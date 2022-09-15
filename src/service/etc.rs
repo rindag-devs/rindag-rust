@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::RwLock};
+use std::{collections::HashMap, sync::RwLock, time};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
+/// RinDAG server config.
 pub struct Cfg {
-  // The address for the RinDAG http server to listen on
+  /// The address for the RinDAG http server to listen on.
   pub addr: String,
 
   pub postgres: PostgresCfg,
@@ -13,6 +15,8 @@ pub struct Cfg {
   pub git: GitCfg,
 
   pub lang: HashMap<String, LangCfg>,
+
+  pub judge: JudgeCfg,
 }
 
 impl Default for Cfg {
@@ -63,12 +67,24 @@ impl Default for Cfg {
           },
         ),
       ]),
+      judge: JudgeCfg {
+        env: vec![
+          "PATH=/usr/local/bin:/usr/bin:/bin".to_string(),
+          "HOME=/tmp".to_string(),
+        ],
+        time_limit: time::Duration::from_secs(10),
+        memory_limit: 1024 * 1024 * 1024, // 1 GB
+        process_limit: 16,                // 16 processes
+        stdout_limit: 512 * 1024 * 1024,  // 512 MB
+        stderr_limit: 16 * 1024,          // 16 kB
+      },
     };
   }
 }
 
-// Postgresql database config
+/// Postgresql database config.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
 pub struct PostgresCfg {
   pub host: String,
   pub port: i32,
@@ -78,7 +94,7 @@ pub struct PostgresCfg {
   pub use_ssl: bool,
 }
 
-// Redis config
+/// Redis config.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RedisCfg {
   pub addr: String,
@@ -86,50 +102,73 @@ pub struct RedisCfg {
   pub db: i32,
 }
 
-// Git config
+/// Git config.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GitCfg {
-  // Git exec path
-  // Like `/usr/bin/git`
+  /// Git exec path like `/usr/bin/git`.
   pub exec_path: String,
 
-  // Path to the git repositories
-  // Like `/var/lib/rindag/git`
+  /// Path to the git repositories, like `/var/lib/rindag/git`.
   pub repo_path: String,
 }
 
-// Problem build config
+/// Problem build config.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BuildCfg {
-  // Path to storage the problem build files
-  // Like `/var/lib/rindag/build`
+  /// Path to storage the problem build files, like `/var/lib/rindag/build`.
   pub storage_path: String,
 
-  // Auto build problem when push to master branch
+  /// Auto build problem when push to master branch.
   pub build_when_push: bool,
 }
 
-// Programming language config
+/// Programming language config.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LangCfg {
   pub compile_cmd: Vec<String>,
 
   pub run_cmd: Vec<String>,
 
-  // Name of source file
+  /// Name of source file
   pub source_name: String,
 
-  // Name of executable file
+  /// Name of executable file
   pub exec_name: String,
 }
 
+/// Judge config.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct JudgeCfg {
+  /// Environment variables.
+  pub env: Vec<String>,
+
+  /// CPU time limits for compilation non-solution programs running
+  /// such as checkers, validators, generators, etc.
+  pub time_limit: time::Duration,
+
+  /// Memory limit for compilation and running non-solution programs in bytes.
+  pub memory_limit: u64,
+
+  /// Default process count limit.
+  pub process_limit: u64,
+
+  /// Default stdout limit, in bytes.
+  pub stdout_limit: u64,
+
+  /// Default stderr limit, in bytes.
+  pub stderr_limit: u64,
+}
+
 lazy_static! {
+  /// Global config.
   pub static ref CONFIG: RwLock<Cfg> = RwLock::new(Cfg::default());
 }
 
+/// Load the global config.
+///
+/// It should be called on the top of `main` fn.
 pub fn load_config(search_paths: &Vec<String>) {
   let mut builder = config::Config::builder()
-    .add_source(config::Config::try_from(&Cfg::default()).unwrap())
     .add_source(config::File::with_name("/etc/rindag/config").required(false));
 
   for p in search_paths {

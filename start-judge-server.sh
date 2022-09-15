@@ -6,7 +6,6 @@ docker run -d \
   --rm \
   --privileged \
   --shm-size=1g \
-  -p 5051:5051 \
+  -p 5050:5050 \
   rindag-judge-server \
-  -enable-grpc \
   -file-timeout 30m
