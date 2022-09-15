@@ -5,7 +5,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::service::judge::{self, exec};
+use crate::service::sandbox::{self, exec};
 
 fn init() {
   let _ = pretty_env_logger::env_logger::Builder::from_env(
@@ -15,11 +15,11 @@ fn init() {
   .try_init();
 }
 
-/// A test for judge running `/usr/bin/cat` to print the file content.
+/// A test for sandbox running `/usr/bin/cat` to print the file content.
 ///
 /// This test uses raw websocket connection without a go-judge client.
 #[tokio::test]
-async fn test_judge_raw_cat() {
+async fn test_raw_cat() {
   init();
 
   let (socket, _) =
@@ -88,12 +88,12 @@ async fn test_judge_raw_cat() {
   write.close().await.unwrap();
 }
 
-/// A test for judge compiling and running a C code with gcc.
+/// A test for sandbox compiling and running a C code with gcc.
 #[tokio::test]
-async fn test_judge_gcc() {
+async fn test_hello_world() {
   init();
 
-  let mut client = judge::Client::new("localhost:5050", false).await;
+  let mut client = sandbox::Client::new("localhost:5050", false).await;
 
   let (_, rx) = client
     .run(
@@ -102,7 +102,8 @@ async fn test_judge_gcc() {
         copy_in: HashMap::from([(
           "a.c".to_string(),
           exec::File::Memory {
-            content: "#include<stdio.h>\nint main(){puts(\"hello\");}".to_string(),
+            content: "#include<stdio.h>\nint main(){puts(\"hello, world!\\n你好, 世界!\");}"
+              .to_string(),
           },
         )]),
         copy_out: vec![],
@@ -140,5 +141,5 @@ async fn test_judge_gcc() {
   let run_res = &rx.await.unwrap().results[0];
 
   assert_eq!(run_res.status, exec::Status::Accepted);
-  assert_eq!(run_res.files["stdout"], "hello\n");
+  assert_eq!(run_res.files["stdout"], "hello, world!\n你好, 世界!\n");
 }

@@ -75,7 +75,7 @@ impl Client {
     };
   }
 
-  /// Get a file of judge server.
+  /// Get a file of sandbox server.
   ///
   /// It will return it's content.
   pub async fn get_file(&self, file_id: &str) -> Result<Bytes, reqwest::Error> {
@@ -88,7 +88,7 @@ impl Client {
     );
   }
 
-  /// Delete a file of judge server.
+  /// Delete a file of sandbox server.
   pub async fn delete_file(&self, file_id: &str) -> Result<(), reqwest::Error> {
     reqwest::Client::new()
       .delete(format!("{}/file{}", &self.http_host, file_id))
@@ -98,7 +98,7 @@ impl Client {
     return Ok(());
   }
 
-  /// List all files of judge server.
+  /// List all files of sandbox server.
   ///
   /// - Key of hashmap is file id.
   /// - Value of hashmap is file name.
