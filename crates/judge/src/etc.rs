@@ -8,6 +8,13 @@ pub struct Cfg {
   /// The address for the RinDAG http server to listen on.
   pub host: String,
 
+  /// Judge token secret.
+  ///
+  /// Set to `None` to disable auth.
+  ///
+  /// WARNING: Be sure to set a token secret in a production environment.
+  pub secret: Option<String>,
+
   pub lang: HashMap<String, LangCfg>,
 
   pub sandbox: SandboxCfg,
@@ -18,29 +25,46 @@ impl Default for Cfg {
   fn default() -> Self {
     return Cfg {
       host: ":8080".to_string(),
+      secret: None,
       lang: HashMap::from([
         (
           "c".to_string(),
           LangCfg {
-            compile_cmd: ["/usr/bin/gcc", "foo.c", "-o", "foo", "-O2"]
-              .iter()
-              .map(|&s| s.into())
-              .collect(),
+            compile_cmd: [
+              "/usr/bin/gcc",
+              "foo.c",
+              "-o",
+              "foo",
+              "-O2",
+              "-w",
+              "-fmax-errors=3",
+            ]
+            .iter()
+            .map(|&s| s.into())
+            .collect(),
             run_cmd: vec!["foo".to_string()],
-            source_name: "foo.c".to_string(),
-            exec_name: "foo".to_string(),
+            source: "foo.c".to_string(),
+            exec: "foo".to_string(),
           },
         ),
         (
           "cpp".to_string(),
           LangCfg {
-            compile_cmd: ["/usr/bin/g++", "foo.cpp", "-o", "foo", "-O2"]
-              .iter()
-              .map(|&s| s.into())
-              .collect(),
+            compile_cmd: [
+              "/usr/bin/g++",
+              "foo.cpp",
+              "-o",
+              "foo",
+              "-O2",
+              "-w",
+              "-fmax-errors=3",
+            ]
+            .iter()
+            .map(|&s| s.into())
+            .collect(),
             run_cmd: vec!["foo".to_string()],
-            source_name: "foo.cpp".to_string(),
-            exec_name: "foo".to_string(),
+            source: "foo.cpp".to_string(),
+            exec: "foo".to_string(),
           },
         ),
       ]),
@@ -69,10 +93,10 @@ pub struct LangCfg {
   pub run_cmd: Vec<String>,
 
   /// Name of source file
-  pub source_name: String,
+  pub source: String,
 
   /// Name of executable file
-  pub exec_name: String,
+  pub exec: String,
 }
 
 /// Sandbox config.

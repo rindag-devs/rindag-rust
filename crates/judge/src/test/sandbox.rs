@@ -115,8 +115,7 @@ async fn test_hello_world() {
       }],
       vec![],
     )
-    .await
-    .unwrap();
+    .await;
 
   let compile_res = &rx.await.unwrap().results[0];
 
@@ -138,8 +137,7 @@ async fn test_hello_world() {
       }],
       vec![],
     )
-    .await
-    .unwrap();
+    .await;
 
   let run_res = &rx.await.unwrap().results[0];
 

@@ -1,14 +1,17 @@
 use std::{
+  cell::RefCell,
   collections::HashMap,
+  rc::Rc,
   sync::{Arc, Mutex},
 };
 
+use async_once::AsyncOnce;
 use bytes::Bytes;
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
 use tokio::{net::TcpStream, sync::oneshot};
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::etc;
+use crate::etc::{self, CONFIG};
 
 use super::exec::{self, WSResult};
 
@@ -88,6 +91,20 @@ impl Client {
     );
   }
 
+  /// Prepare a file in the sandbox, returns file id (can be referenced in `run` parameter).
+  pub async fn add_file(&self, content: Bytes) -> Result<String, reqwest::Error> {
+    return Ok(
+      reqwest::Client::new()
+        .post(format!("{}/file", &self.http_host))
+        .body(reqwest::Body::from(content))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?,
+    );
+  }
+
   /// Delete a file of sandbox server.
   pub async fn delete_file(&self, file_id: &str) -> Result<(), reqwest::Error> {
     reqwest::Client::new()
@@ -132,22 +149,34 @@ impl Client {
     &mut self,
     cmd: Vec<exec::Cmd>,
     pipe_mapping: Vec<exec::PipeMap>,
-  ) -> Result<(uuid::Uuid, oneshot::Receiver<WSResult>), tokio_tungstenite::tungstenite::Error> {
+  ) -> (uuid::Uuid, oneshot::Receiver<WSResult>) {
     let req = exec::Request::new(cmd, pipe_mapping);
 
     let (tx, rx) = oneshot::channel();
-    let _ = self
-      .senders
-      .lock()
-      .unwrap()
-      .insert(req.request_id.clone(), tx);
 
-    self
+    match self
       .ws_writer
       .send(Message::Text(serde_json::to_string(&req).unwrap()))
-      .await?;
+      .await
+    {
+      Ok(_) => {
+        let _ = self
+          .senders
+          .lock()
+          .unwrap()
+          .insert(req.request_id.clone(), tx);
+      }
+      Err(e) => {
+        log::error!("WebSocket send error: {}", e);
+        let _ = tx.send(WSResult {
+          request_id: req.request_id.clone(),
+          results: vec![],
+          error: Some(format!("WebSocket send error: {}", e)),
+        });
+      }
+    }
 
-    return Ok((req.request_id, rx));
+    return (req.request_id, rx);
   }
 
   /// Cancel running a command.
@@ -164,4 +193,12 @@ impl Client {
 
     return Ok(());
   }
+}
+
+lazy_static! {
+  pub static ref CLIENT: AsyncOnce<Rc<RefCell<Client>>> = AsyncOnce::new(async {
+    return Rc::new(RefCell::new(
+      Client::from_config(&CONFIG.read().unwrap()).await,
+    ));
+  });
 }
