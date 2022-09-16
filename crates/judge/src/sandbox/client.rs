@@ -1,6 +1,5 @@
 use std::{
   collections::HashMap,
-  str::FromStr,
   sync::{Arc, Mutex},
 };
 
@@ -8,6 +7,8 @@ use bytes::Bytes;
 use futures_util::{stream::SplitSink, SinkExt, StreamExt};
 use tokio::{net::TcpStream, sync::oneshot};
 use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
+
+use crate::etc;
 
 use super::exec::{self, WSResult};
 
@@ -22,22 +23,16 @@ impl Client {
   /// Create a new client from host.
   ///
   /// If `security` is true, it will use wss and https.
-  pub async fn new(host: &str, security: bool) -> Self {
+  pub async fn new(http_host: url::Url, ws_host: &url::Url) -> Self {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let senders = Arc::new(Mutex::new(HashMap::<
       uuid::Uuid,
       oneshot::Sender<exec::WSResult>,
     >::new()));
-    let http_host =
-      url::Url::from_str(&(if security { "https://" } else { "http://" }.to_string() + host))
-        .expect("Invalid url");
-    let ws_socket = tokio_tungstenite::connect_async(
-      url::Url::parse(&(if security { "wss://" } else { "ws://" }.to_string() + host + "/ws"))
-        .unwrap(),
-    )
-    .await
-    .expect(&format!("Failed to connect to websocket {}", host))
-    .0;
+    let ws_socket = tokio_tungstenite::connect_async(ws_host)
+      .await
+      .expect(&format!("Failed to connect to websocket {}", ws_host))
+      .0;
 
     let (write, mut read) = ws_socket.split();
 
@@ -73,6 +68,11 @@ impl Client {
       senders,
       ws_writer: write,
     };
+  }
+
+  // Create a new client from global config.
+  pub async fn from_config(cfg: &etc::Cfg) -> Self {
+    Self::new(cfg.sandbox.http_host.clone(), &cfg.sandbox.ws_host).await
   }
 
   /// Get a file of sandbox server.

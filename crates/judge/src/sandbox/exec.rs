@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::service::etc::CONFIG;
+use crate::etc::CONFIG;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(untagged)]
@@ -103,7 +103,7 @@ pub struct Cmd {
 
 impl Default for Cmd {
   fn default() -> Self {
-    let c = &CONFIG.read().unwrap().judge;
+    let c = &CONFIG.read().unwrap().sandbox;
     Cmd {
       args: vec![],
       env: c.env.clone(),

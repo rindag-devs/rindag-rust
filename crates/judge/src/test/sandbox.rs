@@ -5,7 +5,10 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::time::sleep;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::service::sandbox::{self, exec};
+use crate::{
+  etc::CONFIG,
+  sandbox::{self, exec},
+};
 
 fn init() {
   let _ = pretty_env_logger::env_logger::Builder::from_env(
@@ -93,7 +96,7 @@ async fn test_raw_cat() {
 async fn test_hello_world() {
   init();
 
-  let mut client = sandbox::Client::new("localhost:5050", false).await;
+  let mut client = sandbox::Client::from_config(&CONFIG.read().unwrap()).await;
 
   let (_, rx) = client
     .run(

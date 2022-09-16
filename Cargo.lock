@@ -1136,6 +1136,13 @@ dependencies = [
 name = "rindag"
 version = "0.1.0-dev"
 dependencies = [
+ "shadow-rs",
+]
+
+[[package]]
+name = "rindag-judge"
+version = "0.1.0-dev"
+dependencies = [
  "async-stream",
  "bytes",
  "clap",
@@ -1664,6 +1671,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]
