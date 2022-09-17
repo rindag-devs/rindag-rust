@@ -12,8 +12,7 @@ use std::error::Error;
 
 use clap::Parser;
 
-use crate::etc::CONFIG;
-pub use crate::result::Status;
+pub use crate::{etc::CONFIG, result::Status, sandbox::client::CLIENT};
 
 extern crate pretty_env_logger;
 #[macro_use]

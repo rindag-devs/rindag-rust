@@ -2,18 +2,10 @@ use std::str::FromStr;
 
 use regex::Regex;
 
-use crate::Status;
+use crate::{result, Status};
 
 /// Testlib source code.
 pub static TESTLIB_SOURCE: &str = include_str!("../third_party/testlib/testlib.h");
-
-fn limit_str(s: &str) -> String {
-  const LIMIT: usize = 1024;
-  if s.len() <= LIMIT {
-    return s.to_string();
-  }
-  return s.chars().take(LIMIT - 3).collect::<String>() + "...";
-}
 
 /// Parse the output of testlib.
 ///
@@ -33,15 +25,19 @@ pub fn parse_output(output: &str, fail_as_wa: bool) -> (Status, f32, String) {
       Regex::new(r"(?m)^[ \t]*(status|score)\((\w+)\)[ \t]*(.*?)\s*$").unwrap();
   }
 
-  let mut ret = (Status::SystemError, 0., limit_str(output));
+  let mut ret = (Status::SystemError, 0., result::limit_message(output));
 
   if let Some(cap) = AC_PAT.captures(output) {
-    ret = (Status::Accepted, 1., limit_str(&format!("ac {}", &cap[1])));
+    ret = (
+      Status::Accepted,
+      1.,
+      result::limit_message(&format!("ac {}", &cap[1])),
+    );
   } else if let Some(cap) = WA_PAT.captures(output) {
     ret = (
       Status::WrongAnswer,
       0.,
-      limit_str(&format!("wa {}", &cap[1])),
+      result::limit_message(&format!("wa {}", &cap[1])),
     );
   } else if let Some(cap) = FAIL_PAT.captures(output) {
     ret = (
@@ -51,29 +47,33 @@ pub fn parse_output(output: &str, fail_as_wa: bool) -> (Status, f32, String) {
         Status::SystemError
       },
       0.,
-      limit_str(&format!("fail {}", &cap[1])),
+      result::limit_message(&format!("fail {}", &cap[1])),
     );
   } else if let Some(cap) = PE_PAT.captures(output) {
     ret = (
       Status::PresentationError,
       0.,
-      limit_str(&format!("pe {}", &cap[1])),
+      result::limit_message(&format!("pe {}", &cap[1])),
     );
   } else if let Some(cap) = PC_PAT.captures(output) {
     if let Ok(score) = cap[1].parse::<f32>() {
       if score >= 1. {
-        ret = (Status::Accepted, 1., limit_str(&format!("ac {}", &cap[2])));
+        ret = (
+          Status::Accepted,
+          1.,
+          result::limit_message(&format!("ac {}", &cap[2])),
+        );
       } else if score <= 0. {
         ret = (
           Status::WrongAnswer,
           0.,
-          limit_str(&format!("wa {}", &cap[2])),
+          result::limit_message(&format!("wa {}", &cap[2])),
         );
       } else {
         ret = (
           Status::PartiallyCorrect,
           score,
-          limit_str(&format!("pc {}", &cap[2])),
+          result::limit_message(&format!("pc {}", &cap[2])),
         );
       }
     }

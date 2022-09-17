@@ -83,7 +83,7 @@ impl Client {
   /// It will return it's content.
   pub async fn get_file(&self, file_id: &str) -> Result<Bytes, reqwest::Error> {
     return Ok(
-      reqwest::get(format!("{}/file/{}", &self.http_host, file_id))
+      reqwest::get(self.http_host.join("file/").unwrap().join(file_id).unwrap())
         .await?
         .error_for_status()?
         .bytes()
@@ -95,7 +95,7 @@ impl Client {
   pub async fn add_file(&self, content: Bytes) -> Result<String, reqwest::Error> {
     return Ok(
       reqwest::Client::new()
-        .post(format!("{}/file", &self.http_host))
+        .post(self.http_host.join("file/").unwrap())
         .body(reqwest::Body::from(content))
         .send()
         .await?
@@ -108,7 +108,7 @@ impl Client {
   /// Delete a file of sandbox server.
   pub async fn delete_file(&self, file_id: &str) -> Result<(), reqwest::Error> {
     reqwest::Client::new()
-      .delete(format!("{}/file{}", &self.http_host, file_id))
+      .delete(self.http_host.join("file/").unwrap().join(file_id).unwrap())
       .send()
       .await?
       .error_for_status()?;
@@ -121,7 +121,7 @@ impl Client {
   /// - Value of hashmap is file name.
   pub async fn list_files(&self) -> Result<HashMap<String, String>, reqwest::Error> {
     return Ok(
-      reqwest::get(format!("{}/file", &self.http_host))
+      reqwest::get(self.http_host.join("file").unwrap())
         .await?
         .error_for_status()?
         .json()
@@ -132,7 +132,7 @@ impl Client {
   /// Get go-judge server version.
   pub async fn version(&self) -> Result<String, reqwest::Error> {
     return Ok(
-      reqwest::get(format!("{}/version", &self.http_host))
+      reqwest::get(self.http_host.join("version").unwrap())
         .await?
         .error_for_status()?
         .text()

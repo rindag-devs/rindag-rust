@@ -1,5 +1,4 @@
-use core::time;
-use std::collections::HashMap;
+use std::{collections::HashMap, time};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::time::sleep;

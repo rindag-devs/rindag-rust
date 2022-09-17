@@ -143,17 +143,24 @@ impl Default for Cmd {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Copy)]
 pub enum Status {
   Accepted,
+
   #[serde(alias = "Memory Limit Exceeded")]
   MemoryLimitExceeded, // mle
+
   #[serde(alias = "Time Limit Exceeded")]
   TimeLimitExceeded, // tle
+
   #[serde(alias = "Output Limit Exceeded")]
   OutputLimitExceeded, // ole
+
   #[serde(alias = "File Error")]
   FileError, // fe
+
   #[serde(alias = "Nonzero Exit Status")]
   NonzeroExitStatus,
+
   Signalled,
+
   #[serde(alias = "Internal Error")]
   InternalError, // system error
 }
