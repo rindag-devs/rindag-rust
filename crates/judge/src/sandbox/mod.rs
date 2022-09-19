@@ -1,4 +1,4 @@
 pub mod client;
-pub mod exec;
+pub mod proto;
 
 pub use client::Client;

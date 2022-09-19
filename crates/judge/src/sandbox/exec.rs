@@ -67,11 +67,9 @@ pub struct Cmd {
   pub proc_limit: u64,
 
   /// limit cpu usage (1000 equals 1 cpu)
-  #[serde(skip_serializing_if = "Option::is_none")]
   pub cpu_rate_limit: Option<u64>,
 
   /// Linux only: set the cpuSet for cgroup
-  #[serde(skip_serializing_if = "Option::is_none")]
   pub cpu_set_limit: Option<String>,
 
   /// Linux only: use stricter memory limit (+ rlimit_data when cgroup enabled)
@@ -97,7 +95,6 @@ pub struct Cmd {
   /// specifies the max file size to copy out
   ///
   /// byte
-  #[serde(skip_serializing_if = "Option::is_none")]
   pub copy_out_max: Option<u64>,
 }
 

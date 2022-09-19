@@ -10,18 +10,13 @@ pub mod testlib;
 
 use std::error::Error;
 
-use clap::Parser;
+pub use crate::{args::ARGS, etc::CONFIG, result::Status, sandbox::client::CLIENT};
 
-pub use crate::{etc::CONFIG, result::Status, sandbox::client::CLIENT};
-
-extern crate pretty_env_logger;
 #[macro_use]
 extern crate lazy_static;
 extern crate log;
 
 fn main() -> Result<(), Box<dyn Error>> {
-  let args = args::Args::parse();
-  etc::load_config(&args.config_search_path);
   dbg!(&*CONFIG);
   return Ok(());
 }

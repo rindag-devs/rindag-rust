@@ -1,20 +1,23 @@
 use std::collections::HashMap;
 
-use crate::{etc::CONFIG, result, sandbox::exec, task, CLIENT};
+use crate::{etc::CONFIG, result, sandbox::proto, task, CLIENT};
 
-async fn compile_test_c_prog() -> (result::CompileResult, Result<String, exec::FileError>) {
+async fn compile_test_c_prog() -> (result::CompileResult, Result<String, proto::FileError>) {
   return task::compile(
-    &CONFIG.read().unwrap().lang["c"],
-    exec::File::Memory {
-      content: "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}".to_string(),
-    },
+    &CONFIG.lang["c"],
+    proto::File::Memory(proto::MemoryFile {
+      content: "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}"
+        .as_bytes()
+        .to_vec(),
+    }),
     HashMap::from([(
       "my_head.c".to_string(),
-      exec::File::Memory {
+      proto::File::Memory(proto::MemoryFile {
         content:
           "#include<stdio.h>\nvoid func(){int x;scanf(\"%d\",&x);printf(\"func: %d\\n\",x);}"
-            .to_string(),
-      },
+            .as_bytes()
+            .to_vec(),
+      }),
     )]),
   )
   .await;
@@ -24,22 +27,22 @@ async fn compile_test_c_prog() -> (result::CompileResult, Result<String, exec::F
 async fn test_compile_c_ok() {
   let res = compile_test_c_prog().await;
 
-  assert_eq!(res.0.status, exec::Status::Accepted);
+  assert_eq!(res.0.status, proto::StatusType::Accepted);
   assert!(res.1.is_ok());
 }
 
 #[tokio::test]
 async fn test_compile_c_ce() {
   let res = task::compile(
-    &CONFIG.read().unwrap().lang["c"],
-    exec::File::Memory {
-      content: "ERROR!".to_string(),
-    },
+    &CONFIG.lang["c"],
+    proto::File::Memory(proto::MemoryFile {
+      content: "ERROR!".as_bytes().to_vec(),
+    }),
     HashMap::new(),
   )
   .await;
 
-  assert_eq!(res.0.status, exec::Status::NonzeroExitStatus);
+  assert_eq!(res.0.status, proto::StatusType::NonZeroExitStatus);
   assert!(res.1.is_err());
 }
 
@@ -47,17 +50,17 @@ async fn test_compile_c_ce() {
 async fn test_compile_run_batch() {
   let res = compile_test_c_prog().await;
 
-  assert_eq!(res.0.status, exec::Status::Accepted);
+  assert_eq!(res.0.status, proto::StatusType::Accepted);
   assert!(res.1.is_ok());
 
   let exec_id = res.1.unwrap();
 
   let res = task::judge_batch(
-    &CONFIG.read().unwrap().lang["c"],
-    exec::File::Prepared { file_id: exec_id },
-    exec::File::Memory {
-      content: "998244343".to_string(),
-    },
+    &CONFIG.lang["c"],
+    proto::File::Cached(proto::CachedFile { file_id: exec_id }),
+    proto::File::Memory(proto::MemoryFile {
+      content: "998244343".as_bytes().to_vec(),
+    }),
     HashMap::new(),
   )
   .await;
@@ -68,10 +71,13 @@ async fn test_compile_run_batch() {
   let output = CLIENT
     .get()
     .await
-    .borrow()
-    .get_file(&res.1.unwrap())
+    .as_ref()
+    .file_get(res.1.unwrap())
     .await
     .unwrap();
 
-  assert_eq!(output, "hello\nfunc: 998244343\n");
+  assert_eq!(
+    output.content,
+    "hello\nfunc: 998244343\n".as_bytes().to_vec()
+  );
 }

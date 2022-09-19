@@ -1,112 +1,85 @@
-use std::{collections::HashMap, time};
+use std::collections::HashMap;
 
-use futures_util::{SinkExt, StreamExt};
-use tokio::time::sleep;
-use tokio_tungstenite::tungstenite::Message;
-
-use crate::{
-  etc::CONFIG,
-  sandbox::{self, exec},
-};
-
-fn init() {
-  let _ = pretty_env_logger::env_logger::Builder::from_env(
-    pretty_env_logger::env_logger::Env::default().default_filter_or("info"),
-  )
-  .is_test(true)
-  .try_init();
-}
+use crate::{sandbox::proto, CLIENT};
 
 /// A test for sandbox running `/usr/bin/cat` to print the file content.
 ///
-/// This test uses raw websocket connection without a go-judge client.
+/// This test uses raw gRpc connection without a go-judge client.
 #[tokio::test]
 async fn test_raw_cat() {
-  init();
+  super::init();
 
-  let (socket, _) =
-    tokio_tungstenite::connect_async(url::Url::parse("ws://localhost:5050/ws").unwrap())
-      .await
-      .expect("Can't connect");
+  let mut client = proto::ExecutorClient::connect(tonic::transport::Channel::from_static(
+    "http://localhost:5051",
+  ))
+  .await
+  .unwrap();
 
-  let (mut write, mut read) = socket.split();
+  let content = vec![9, 9, 8, 2, 100, 200, 240, 255];
 
-  let req_id = uuid::Uuid::new_v4();
-
-  let req = exec::Request {
-    request_id: req_id.clone(),
-    cmd: vec![exec::Cmd {
+  let req = proto::Request {
+    cmd: vec![proto::CmdType {
       args: vec!["/usr/bin/cat".to_string(), "a.txt".to_string()],
       files: vec![
-        exec::File::Memory {
-          content: "".to_string(),
+        proto::request::File {
+          file: Some(proto::File::Memory(proto::MemoryFile { content: vec![] })),
         },
-        exec::File::Collector {
-          name: "stdout".to_string(),
-          max: 10240,
-          pipe: false,
+        proto::request::File {
+          file: Some(proto::File::Pipe(proto::PipeCollector {
+            name: "stdout".to_string(),
+            max: 10240,
+            pipe: false,
+          })),
         },
       ],
       copy_in: HashMap::from([(
         "a.txt".to_string(),
-        exec::File::Memory {
-          content: "\x01na\u{00ef}ve\n".to_string(),
+        proto::request::File {
+          file: Some(proto::File::Memory(proto::MemoryFile {
+            content: content.clone(),
+          })),
         },
       )]),
-      cpu_limit: std::time::Duration::from_secs(200).as_nanos() as u64,
-      clock_limit: std::time::Duration::from_secs(200).as_nanos() as u64,
-      copy_out: vec!["stdout".to_string()],
+      cpu_time_limit: std::time::Duration::from_secs(200).as_nanos() as u64,
+      clock_time_limit: std::time::Duration::from_secs(200).as_nanos() as u64,
+      memory_limit: 1024 * 1024 * 1024,
+      proc_limit: 16,
+      copy_out: vec![proto::CmdCopyOutFile {
+        name: "stdout".to_string(),
+        optional: false,
+      }],
       ..Default::default()
     }],
     pipe_mapping: vec![],
+    ..Default::default()
   };
 
-  // dbg!(serde_json::to_string(&req).unwrap());
+  let resp = client.exec(req).await.unwrap().get_ref().clone();
 
-  write
-    .send(Message::Text(serde_json::to_string(&req).unwrap()))
-    .await
-    .unwrap();
-
-  sleep(time::Duration::from_secs(1)).await;
-
-  loop {
-    match read.next().await.unwrap().unwrap() {
-      Message::Text(s) => {
-        let resp: exec::WSResult = serde_json::from_str(&s).unwrap();
-
-        assert_eq!(resp.request_id, req_id);
-        assert_eq!(resp.results.len(), 1);
-        assert_eq!(resp.results[0].status, exec::Status::Accepted);
-        assert_eq!(resp.results[0].exit_status, 0);
-        assert_eq!(resp.results[0].files["stdout"], "\x01naïve\n");
-
-        break;
-      }
-      _ => {}
-    }
-  }
-
-  write.close().await.unwrap();
+  assert_eq!(resp.results.len(), 1);
+  assert_eq!(resp.results[0].status(), proto::StatusType::Accepted);
+  assert_eq!(resp.results[0].exit_status, 0);
+  assert_eq!(resp.results[0].files["stdout"], content);
 }
 
 /// A test for sandbox compiling and running a C code with gcc.
 #[tokio::test]
 async fn test_hello_world() {
-  init();
+  super::init();
 
-  let mut client = sandbox::Client::from_config(&CONFIG.read().unwrap()).await;
+  let client = CLIENT.get().await.as_ref();
 
-  let (_, rx) = client
-    .run(
-      vec![exec::Cmd {
+  let rx = client
+    .exec(
+      vec![proto::Cmd {
         args: vec!["/usr/bin/gcc".to_string(), "a.c".to_string()],
         copy_in: HashMap::from([(
           "a.c".to_string(),
-          exec::File::Memory {
+          proto::File::Memory(proto::MemoryFile {
             content: "#include<stdio.h>\nint main(){puts(\"hello, world!\\n你好, 世界!\");}"
-              .to_string(),
-          },
+              .as_bytes()
+              .to_vec(),
+          }),
         )]),
         copy_out: vec![],
         copy_out_cached: vec!["a.out".to_string()],
@@ -116,21 +89,21 @@ async fn test_hello_world() {
     )
     .await;
 
-  let compile_res = &rx.await.unwrap().results[0];
+  let compile_res = &rx.await.unwrap().unwrap().results[0];
 
-  assert_eq!(compile_res.status, exec::Status::Accepted);
+  assert_eq!(compile_res.status(), proto::StatusType::Accepted);
 
   let exec_file = compile_res.file_ids["a.out"].to_string();
 
   // dbg!(&exec_file);
 
-  let (_, rx) = client
-    .run(
-      vec![exec::Cmd {
+  let rx = client
+    .exec(
+      vec![proto::Cmd {
         args: vec!["a.out".to_string()],
         copy_in: HashMap::from([(
           "a.out".to_string(),
-          exec::File::Prepared { file_id: exec_file },
+          proto::File::Cached(proto::CachedFile { file_id: exec_file }),
         )]),
         ..Default::default()
       }],
@@ -138,8 +111,11 @@ async fn test_hello_world() {
     )
     .await;
 
-  let run_res = &rx.await.unwrap().results[0];
+  let run_res = &rx.await.unwrap().unwrap().results[0];
 
-  assert_eq!(run_res.status, exec::Status::Accepted);
-  assert_eq!(run_res.files["stdout"], "hello, world!\n你好, 世界!\n");
+  assert_eq!(run_res.status(), proto::StatusType::Accepted);
+  assert_eq!(
+    run_res.files["stdout"],
+    "hello, world!\n你好, 世界!\n".as_bytes().to_vec()
+  );
 }

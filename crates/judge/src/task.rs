@@ -1,16 +1,16 @@
 use std::{collections::HashMap, time};
 
-use crate::{etc, result, sandbox::exec, CLIENT, CONFIG};
+use crate::{etc, result, sandbox::proto, CLIENT, CONFIG};
 
 /// Compile the given code and returns the compile result.
 pub async fn compile(
   lang: &etc::LangCfg,
-  code: exec::File,
-  mut copy_in: HashMap<String, exec::File>,
-) -> (result::CompileResult, Result<String, exec::FileError>) {
+  code: proto::File,
+  mut copy_in: HashMap<String, proto::File>,
+) -> (result::CompileResult, Result<String, proto::FileError>) {
   copy_in.insert(lang.source.clone(), code);
 
-  let cmd = exec::Cmd {
+  let cmd = proto::Cmd {
     args: lang.compile_cmd.clone(),
     copy_in,
     copy_out: vec!["stdout".to_string(), "stderr".to_string()],
@@ -18,26 +18,23 @@ pub async fn compile(
     ..Default::default()
   };
 
-  let mut client = CLIENT.get().await.borrow_mut();
-  let (_, rx) = client.run(vec![cmd], vec![]).await;
+  let client = CLIENT.get().await.as_ref();
+  let rx = client.exec(vec![cmd], vec![]).await;
 
-  let res = rx.await.unwrap();
+  let res = rx.await.unwrap().unwrap();
 
   if res.results.len() != 1 {
-    let err_msg = format!(
-      "Sandbox error: {}",
-      res.error.unwrap_or("No error message".to_string())
-    );
+    let err_msg = format!("Sandbox error: {}", res.error);
     return (
       result::CompileResult {
-        status: exec::Status::InternalError,
+        status: proto::StatusType::InternalError,
         stderr: err_msg.clone(),
         stdout: "".to_string(),
       },
-      Err(exec::FileError {
-        error_type: exec::FileErrorType::CopyOutOpen,
+      Err(proto::FileError {
+        r#type: proto::ErrorType::CopyOutOpen as i32,
         name: lang.exec.clone(),
-        message: Some(err_msg),
+        message: err_msg,
       }),
     );
   }
@@ -63,28 +60,28 @@ pub async fn compile(
 /// and then returns the judgement result and the output file.
 pub async fn judge_batch(
   lang: &etc::LangCfg,
-  exec: exec::File,
-  inf: exec::File,
-  mut copy_in: HashMap<String, exec::File>,
-) -> (result::JudgeResult, Result<String, exec::FileError>) {
-  let c = &CONFIG.read().unwrap().sandbox;
+  proto: proto::File,
+  inf: proto::File,
+  mut copy_in: HashMap<String, proto::File>,
+) -> (result::JudgeResult, Result<String, proto::FileError>) {
+  let c = &CONFIG.sandbox;
 
-  copy_in.insert(lang.exec.clone(), exec);
+  copy_in.insert(lang.exec.clone(), proto);
 
-  let cmd = exec::Cmd {
+  let cmd = proto::Cmd {
     args: lang.run_cmd.clone(),
     files: vec![
       inf,
-      exec::File::Collector {
+      proto::File::Pipe(proto::PipeCollector {
         name: "stdout".to_string(),
         max: c.stdout_limit,
         pipe: false,
-      },
-      exec::File::Collector {
+      }),
+      proto::File::Pipe(proto::PipeCollector {
         name: "stderr".to_string(),
         max: c.stderr_limit,
         pipe: false,
-      },
+      }),
     ],
     copy_in,
     copy_out: vec!["stderr".to_string()],
@@ -92,16 +89,13 @@ pub async fn judge_batch(
     ..Default::default()
   };
 
-  let mut client = CLIENT.get().await.borrow_mut();
-  let (_, rx) = client.run(vec![cmd], vec![]).await;
+  let client = CLIENT.get().await.as_ref();
+  let rx = client.exec(vec![cmd], vec![]).await;
 
-  let res = rx.await.unwrap();
+  let res = rx.await.unwrap().unwrap();
 
   if res.results.len() != 1 {
-    let err_msg = format!(
-      "Sandbox error: {}",
-      res.error.unwrap_or("No error message".to_string())
-    );
+    let err_msg = format!("Sandbox error: {}", res.error);
     return (
       result::JudgeResult {
         status: result::Status::SystemError,
@@ -109,10 +103,10 @@ pub async fn judge_batch(
         memory: 0,
         stderr: err_msg.clone(),
       },
-      Err(exec::FileError {
-        error_type: exec::FileErrorType::CopyOutOpen,
+      Err(proto::FileError {
+        r#type: proto::ErrorType::CopyOutOpen as i32,
         name: "stdout".to_string(),
-        message: Some(err_msg),
+        message: err_msg,
       }),
     );
   }

@@ -2,7 +2,7 @@ use std::time;
 
 use strum::IntoEnumIterator;
 
-use crate::sandbox::exec;
+use crate::sandbox::proto;
 
 /// Limit the message to a maximum of 'LIMIT' characters.
 pub fn limit_message(s: &str) -> String {
@@ -70,17 +70,19 @@ pub enum Status {
   Skipped,
 }
 
-impl From<exec::Status> for Status {
-  fn from(s: exec::Status) -> Self {
+impl From<proto::StatusType> for Status {
+  fn from(s: proto::StatusType) -> Self {
     return match s {
-      exec::Status::Accepted => Self::Accepted,
-      exec::Status::MemoryLimitExceeded => Self::MemoryLimitExceeded,
-      exec::Status::TimeLimitExceeded => Self::TimeLimitExceeded,
-      exec::Status::OutputLimitExceeded => Self::OutputLimitExceeded,
-      exec::Status::FileError => Self::FileError,
-      exec::Status::NonzeroExitStatus => Self::RuntimeError,
-      exec::Status::Signalled => Self::RuntimeError,
-      exec::Status::InternalError => Self::SystemError,
+      proto::StatusType::Invalid => Self::SystemError,
+      proto::StatusType::Accepted => Self::Accepted,
+      proto::StatusType::MemoryLimitExceeded => Self::MemoryLimitExceeded,
+      proto::StatusType::TimeLimitExceeded => Self::TimeLimitExceeded,
+      proto::StatusType::OutputLimitExceeded => Self::OutputLimitExceeded,
+      proto::StatusType::FileError => Self::FileError,
+      proto::StatusType::NonZeroExitStatus => Self::RuntimeError,
+      proto::StatusType::Signalled => Self::RuntimeError,
+      proto::StatusType::DangerousSyscall => Self::RuntimeError,
+      proto::StatusType::InternalError => Self::SystemError,
     };
   }
 }
@@ -88,17 +90,17 @@ impl From<exec::Status> for Status {
 /// Compile result for a code.
 #[derive(Debug)]
 pub struct CompileResult {
-  pub status: exec::Status,
+  pub status: proto::StatusType,
   pub stderr: String,
   pub stdout: String,
 }
 
-impl From<&exec::Result> for CompileResult {
-  fn from(res: &exec::Result) -> Self {
+impl From<&proto::Result> for CompileResult {
+  fn from(res: &proto::Result) -> Self {
     return Self {
-      status: res.status,
-      stderr: limit_message(&res.files["stderr"]),
-      stdout: limit_message(&res.files["stdout"]),
+      status: res.status(),
+      stderr: limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
+      stdout: limit_message(&String::from_utf8_lossy(&res.files["stdout"])),
     };
   }
 }
@@ -119,24 +121,24 @@ pub struct JudgeResult {
   pub stderr: String,
 }
 
-impl From<&exec::Result> for JudgeResult {
-  fn from(res: &exec::Result) -> Self {
+impl From<&proto::Result> for JudgeResult {
+  fn from(res: &proto::Result) -> Self {
     return Self {
-      status: res.status.into(),
+      status: res.status().into(),
       time: time::Duration::from_nanos(res.time),
       memory: res.memory,
-      stderr: match res.status {
-        exec::Status::Signalled => {
+      stderr: match res.status() {
+        proto::StatusType::Signalled => {
           format!(
             "signalled: {}",
             Signal::iter().nth(res.exit_status as usize).unwrap()
           )
         }
-        exec::Status::NonzeroExitStatus => {
-          format!("nonzero_exit_status: {}", res.exit_status)
+        proto::StatusType::NonZeroExitStatus => {
+          format!("non_zero_exit_status: {}", res.exit_status)
         }
-        exec::Status::InternalError => res.error.as_deref().unwrap_or("internal_error").to_string(),
-        _ => limit_message(&res.files["stderr"]),
+        proto::StatusType::InternalError => res.error.clone(),
+        _ => limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
       },
     };
   }

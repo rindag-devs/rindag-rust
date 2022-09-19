@@ -10,4 +10,16 @@ shadow!(build);
 pub struct Args {
   #[clap(short, long, value_parser)]
   pub config_search_path: Vec<String>,
+
+  command: Option<String>,
+
+  #[clap(long)]
+  exact: bool,
+
+  #[clap(long)]
+  nocapture: bool,
+}
+
+lazy_static! {
+  pub static ref ARGS: Args = Args::parse();
 }

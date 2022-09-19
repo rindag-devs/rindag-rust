@@ -1,143 +1,95 @@
-use std::{
-  cell::RefCell,
-  collections::HashMap,
-  rc::Rc,
-  sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use async_once::AsyncOnce;
-use bytes::Bytes;
-use futures_util::{stream::SplitSink, SinkExt, StreamExt};
-use tokio::{net::TcpStream, sync::oneshot};
-use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio::sync::{oneshot, Semaphore};
 
-use crate::etc::{self, CONFIG};
+use crate::etc::CONFIG;
 
-use super::exec::{self, WSResult};
+use super::proto;
+
+type ExecResult = Result<proto::Response, tonic::Status>;
 
 /// go-judge client
 pub struct Client {
-  senders: Arc<Mutex<HashMap<uuid::Uuid, oneshot::Sender<exec::WSResult>>>>,
-  http_host: url::Url,
-  ws_writer: SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+  /// The gRpc client.
+  client: proto::ExecutorClient<tonic::transport::Channel>,
+
+  /// A semaphore to limit for max job count.
+  semaphore: Arc<Semaphore>,
+
+  /// Tokio runtime to spawn tasks.
+  rt: tokio::runtime::Runtime,
 }
 
 impl Client {
   /// Create a new client from host.
   ///
-  /// If `security` is true, it will use wss and https.
-  pub async fn new(http_host: url::Url, ws_host: &url::Url) -> Self {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    let senders = Arc::new(Mutex::new(HashMap::<
-      uuid::Uuid,
-      oneshot::Sender<exec::WSResult>,
-    >::new()));
-    let ws_socket = tokio_tungstenite::connect_async(ws_host)
-      .await
-      .expect(&format!("Failed to connect to websocket {}", ws_host))
-      .0;
-
-    let (write, mut read) = ws_socket.split();
-
-    {
-      let senders = senders.clone();
-      tokio::spawn(async move {
-        while let Some(msg) = read.next().await {
-          match msg {
-            Ok(res) => {
-              let senders = senders.clone();
-              rt.spawn(async move {
-                if let Message::Text(res) = res {
-                  let res: exec::WSResult =
-                    serde_json::from_str(&res).expect("WS socket result json parse error");
-                  log::info!("Received request id: {}", res.request_id);
-                  let _ = senders
-                    .lock()
-                    .unwrap()
-                    .remove(&res.request_id)
-                    .unwrap()
-                    .send(res);
-                }
-              });
-            }
-            Err(e) => log::error!("Websocket read error: {}", e),
-          }
-        }
-      });
-    }
-
-    return Client {
-      http_host,
-      senders,
-      ws_writer: write,
+  /// # Panics
+  ///
+  /// Panics if the endpoint connect error.
+  pub async fn new(endpoint: tonic::transport::Endpoint, max_job: usize) -> Self {
+    return Self {
+      client: proto::ExecutorClient::connect(endpoint).await.unwrap(),
+      semaphore: Arc::new(Semaphore::new(max_job)),
+      rt: tokio::runtime::Builder::new_multi_thread().build().unwrap(),
     };
   }
 
-  // Create a new client from global config.
-  pub async fn from_config(cfg: &etc::Cfg) -> Self {
-    Self::new(cfg.sandbox.http_host.clone(), &cfg.sandbox.ws_host).await
-  }
-
-  /// Get a file of sandbox server.
+  /// Get a file of sandbox server. and return it's content.
   ///
-  /// It will return it's content.
-  pub async fn get_file(&self, file_id: &str) -> Result<Bytes, reqwest::Error> {
-    return Ok(
-      reqwest::get(self.http_host.join("file/").unwrap().join(file_id).unwrap())
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?,
-    );
+  /// # Errors
+  ///
+  /// This function will return an error if the file is not found or the connect is broken.
+  pub async fn file_get(&self, file_id: String) -> Result<proto::FileContent, tonic::Status> {
+    match self
+      .client
+      .clone()
+      .file_get(proto::FileId { file_id })
+      .await
+    {
+      Ok(res) => Ok(res.get_ref().clone()),
+      Err(e) => Err(e),
+    }
   }
 
   /// Prepare a file in the sandbox, returns file id (can be referenced in `run` parameter).
-  pub async fn add_file(&self, content: Bytes) -> Result<String, reqwest::Error> {
-    return Ok(
-      reqwest::Client::new()
-        .post(self.http_host.join("file/").unwrap())
-        .body(reqwest::Body::from(content))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?,
-    );
+  pub async fn file_add(&self, content: Vec<u8>) -> Result<String, tonic::Status> {
+    match self
+      .client
+      .clone()
+      .file_add(proto::FileContent {
+        content,
+        ..Default::default()
+      })
+      .await
+    {
+      Ok(res) => Ok(res.get_ref().file_id.clone()),
+      Err(e) => Err(e),
+    }
   }
 
   /// Delete a file of sandbox server.
-  pub async fn delete_file(&self, file_id: &str) -> Result<(), reqwest::Error> {
-    reqwest::Client::new()
-      .delete(self.http_host.join("file/").unwrap().join(file_id).unwrap())
-      .send()
-      .await?
-      .error_for_status()?;
-    return Ok(());
+  pub async fn file_delete(&self, file_id: String) -> Result<(), tonic::Status> {
+    match self
+      .client
+      .clone()
+      .file_delete(proto::FileId { file_id })
+      .await
+    {
+      Ok(_) => Ok(()),
+      Err(e) => Err(e),
+    }
   }
 
   /// List all files of sandbox server.
   ///
   /// - Key of hashmap is file id.
   /// - Value of hashmap is file name.
-  pub async fn list_files(&self) -> Result<HashMap<String, String>, reqwest::Error> {
-    return Ok(
-      reqwest::get(self.http_host.join("file").unwrap())
-        .await?
-        .error_for_status()?
-        .json()
-        .await?,
-    );
-  }
-
-  /// Get go-judge server version.
-  pub async fn version(&self) -> Result<String, reqwest::Error> {
-    return Ok(
-      reqwest::get(self.http_host.join("version").unwrap())
-        .await?
-        .error_for_status()?
-        .text()
-        .await?,
-    );
+  pub async fn file_list(&self) -> Result<HashMap<String, String>, tonic::Status> {
+    match self.client.clone().file_list(()).await {
+      Ok(res) => Ok(res.get_ref().file_ids.clone()),
+      Err(e) => Err(e),
+    }
   }
 
   /// Execute some command (then not wait).
@@ -145,60 +97,43 @@ impl Client {
   /// All the command will be executed parallelly.
   ///
   /// Returns the uuid of request and an oneshot result receiver.
-  pub async fn run(
-    &mut self,
-    cmd: Vec<exec::Cmd>,
-    pipe_mapping: Vec<exec::PipeMap>,
-  ) -> (uuid::Uuid, oneshot::Receiver<WSResult>) {
-    let req = exec::Request::new(cmd, pipe_mapping);
+  pub async fn exec(
+    &self,
+    cmd: Vec<proto::Cmd>,
+    pipe_mapping: Vec<proto::PipeMap>,
+  ) -> oneshot::Receiver<ExecResult> {
+    let req = proto::Request {
+      cmd: cmd.into_iter().map(|c| c.into()).collect(),
+      pipe_mapping,
+      ..Default::default()
+    };
 
     let (tx, rx) = oneshot::channel();
 
-    match self
-      .ws_writer
-      .send(Message::Text(serde_json::to_string(&req).unwrap()))
-      .await
-    {
-      Ok(_) => {
-        let _ = self
-          .senders
-          .lock()
-          .unwrap()
-          .insert(req.request_id.clone(), tx);
-      }
-      Err(e) => {
-        log::error!("WebSocket send error: {}", e);
-        let _ = tx.send(WSResult {
-          request_id: req.request_id.clone(),
-          results: vec![],
-          error: Some(format!("WebSocket send error: {}", e)),
-        });
-      }
-    }
+    let client = self.client.clone();
+    let permit = self.semaphore.clone().acquire_owned().await.unwrap();
 
-    return (req.request_id, rx);
-  }
+    self.rt.spawn(async move {
+      let _ = tx.send(match client.clone().exec(req).await {
+        Ok(res) => Ok(res.get_ref().clone()),
+        Err(e) => Err(e),
+      });
+      drop(permit);
+    });
 
-  /// Cancel running a command.
-  pub async fn cancel(
-    &mut self,
-    cancel_request_id: uuid::Uuid,
-  ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
-    let req = exec::CancelRequest { cancel_request_id };
-
-    self
-      .ws_writer
-      .send(Message::Text(serde_json::to_string(&req).unwrap()))
-      .await?;
-
-    return Ok(());
+    return rx;
   }
 }
 
 lazy_static! {
-  pub static ref CLIENT: AsyncOnce<Rc<RefCell<Client>>> = AsyncOnce::new(async {
-    return Rc::new(RefCell::new(
-      Client::from_config(&CONFIG.read().unwrap()).await,
-    ));
+  pub static ref CLIENT: AsyncOnce<Arc<Client>> = AsyncOnce::new(async {
+    let conf = &CONFIG.sandbox;
+    return Arc::new(
+      Client::new(
+        tonic::transport::Channel::from_static(&conf.host),
+        conf.max_job,
+      )
+      .await,
+    );
   });
 }

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, str::FromStr, sync::RwLock, time};
+use std::{collections::HashMap, time};
+
+use crate::ARGS;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(default)]
@@ -23,7 +25,7 @@ pub struct Cfg {
 impl Default for Cfg {
   // Set default values for config
   fn default() -> Self {
-    return Cfg {
+    return Self {
       host: ":8080".to_string(),
       secret: None,
       lang: HashMap::from([
@@ -78,8 +80,8 @@ impl Default for Cfg {
         process_limit: 16,                // 16 processes
         stdout_limit: 512 * 1024 * 1024,  // 512 MB
         stderr_limit: 16 * 1024,          // 16 kB
-        http_host: url::Url::from_str("http://localhost:5050").unwrap(),
-        ws_host: url::Url::from_str("ws://localhost:5050/ws").unwrap(),
+        host: "http://localhost:5051".to_string(),
+        max_job: 2,
       },
     };
   }
@@ -116,35 +118,35 @@ pub struct SandboxCfg {
   pub process_limit: u64,
 
   /// Default stdout limit, in bytes.
-  pub stdout_limit: u64,
+  pub stdout_limit: i64,
 
   /// Default stderr limit, in bytes.
-  pub stderr_limit: u64,
+  pub stderr_limit: i64,
 
-  /// Sandbox http host.
-  pub http_host: url::Url,
+  /// Sandbox gRpc server host address.
+  pub host: String,
 
-  /// Sandbox websocket host.
-  pub ws_host: url::Url,
+  /// Max job count running in the same time.
+  pub max_job: usize,
+}
+
+impl Cfg {
+  /// Create and load the config.
+  pub fn load(search_paths: &Vec<String>) -> Self {
+    let mut builder = config::Config::builder()
+      .add_source(config::File::with_name("/etc/rindag/judge").required(false));
+
+    for p in search_paths {
+      builder = builder.add_source(config::File::with_name(p.as_str()).required(false));
+    }
+
+    builder = builder.add_source(config::Environment::with_prefix("RINDAG_JUDGE"));
+
+    return builder.build().unwrap().try_deserialize::<Self>().unwrap();
+  }
 }
 
 lazy_static! {
   /// Global config.
-  pub static ref CONFIG: RwLock<Cfg> = RwLock::new(Cfg::default());
-}
-
-/// Load the global config.
-///
-/// It should be called on the top of `main` fn.
-pub fn load_config(search_paths: &Vec<String>) {
-  let mut builder = config::Config::builder()
-    .add_source(config::File::with_name("/etc/rindag/judge").required(false));
-
-  for p in search_paths {
-    builder = builder.add_source(config::File::with_name(p.as_str()).required(false));
-  }
-
-  builder = builder.add_source(config::Environment::with_prefix("RINDAG_JUDGE"));
-
-  *CONFIG.write().unwrap() = builder.build().unwrap().try_deserialize::<Cfg>().unwrap();
+  pub static ref CONFIG: Cfg = Cfg::load(&ARGS.config_search_path);
 }
