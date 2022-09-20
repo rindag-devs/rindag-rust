@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{sandbox::proto, CLIENT};
+use crate::sandbox::{self, proto};
 
 /// A test for sandbox running `/usr/bin/cat` to print the file content.
 ///
@@ -67,9 +67,9 @@ async fn test_raw_cat() {
 async fn test_hello_world() {
   super::init();
 
-  let client = CLIENT.get().await.as_ref();
+  let sandbox = sandbox::Client::from_global_config().await;
 
-  let rx = client
+  let rx = sandbox
     .exec(
       vec![proto::Cmd {
         args: vec!["/usr/bin/gcc".to_string(), "a.c".to_string()],
@@ -97,7 +97,7 @@ async fn test_hello_world() {
 
   // dbg!(&exec_file);
 
-  let rx = client
+  let rx = sandbox
     .exec(
       vec![proto::Cmd {
         args: vec!["a.out".to_string()],

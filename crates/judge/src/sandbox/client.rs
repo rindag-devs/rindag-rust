@@ -1,11 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use async_once::AsyncOnce;
 use tokio::sync::{oneshot, Semaphore};
 
-use crate::etc::CONFIG;
-
-use super::proto;
+use crate::{sandbox::proto, CONFIG};
 
 type ExecResult = Result<proto::Response, tonic::Status>;
 
@@ -16,9 +13,6 @@ pub struct Client {
 
   /// A semaphore to limit for max job count.
   semaphore: Arc<Semaphore>,
-
-  /// Tokio runtime to spawn tasks.
-  rt: tokio::runtime::Runtime,
 }
 
 impl Client {
@@ -27,12 +21,20 @@ impl Client {
   /// # Panics
   ///
   /// Panics if the endpoint connect error.
-  pub async fn new(endpoint: tonic::transport::Endpoint, max_job: usize) -> Self {
+  pub async fn connect(endpoint: tonic::transport::Endpoint, max_job: usize) -> Self {
     return Self {
       client: proto::ExecutorClient::connect(endpoint).await.unwrap(),
       semaphore: Arc::new(Semaphore::new(max_job)),
-      rt: tokio::runtime::Builder::new_multi_thread().build().unwrap(),
     };
+  }
+
+  pub async fn from_global_config() -> Self {
+    let conf = &CONFIG.sandbox;
+    return Self::connect(
+      tonic::transport::Channel::from_static(&conf.host),
+      conf.max_job,
+    )
+    .await;
   }
 
   /// Get a file of sandbox server. and return it's content.
@@ -113,7 +115,7 @@ impl Client {
     let client = self.client.clone();
     let permit = self.semaphore.clone().acquire_owned().await.unwrap();
 
-    self.rt.spawn(async move {
+    tokio::spawn(async move {
       let _ = tx.send(match client.clone().exec(req).await {
         Ok(res) => Ok(res.get_ref().clone()),
         Err(e) => Err(e),
@@ -123,17 +125,4 @@ impl Client {
 
     return rx;
   }
-}
-
-lazy_static! {
-  pub static ref CLIENT: AsyncOnce<Arc<Client>> = AsyncOnce::new(async {
-    let conf = &CONFIG.sandbox;
-    return Arc::new(
-      Client::new(
-        tonic::transport::Channel::from_static(&conf.host),
-        conf.max_job,
-      )
-      .await,
-    );
-  });
 }

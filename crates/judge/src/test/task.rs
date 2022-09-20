@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-use crate::{etc::CONFIG, result, sandbox::proto, task, CLIENT};
+use crate::{
+  etc::CONFIG,
+  result,
+  sandbox::{self, proto},
+  task,
+};
 
-async fn compile_test_c_prog() -> (result::CompileResult, Result<String, proto::FileError>) {
+async fn compile_test_c_prog(
+  sandbox: &sandbox::Client,
+) -> (result::CompileResult, Result<String, proto::FileError>) {
   return task::compile(
+    sandbox,
     &CONFIG.lang["c"],
     proto::File::Memory(proto::MemoryFile {
       content: "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}"
@@ -25,7 +33,8 @@ async fn compile_test_c_prog() -> (result::CompileResult, Result<String, proto::
 
 #[tokio::test]
 async fn test_compile_c_ok() {
-  let res = compile_test_c_prog().await;
+  let sandbox = sandbox::Client::from_global_config().await;
+  let res = compile_test_c_prog(&sandbox).await;
 
   assert_eq!(res.0.status, proto::StatusType::Accepted);
   assert!(res.1.is_ok());
@@ -33,7 +42,9 @@ async fn test_compile_c_ok() {
 
 #[tokio::test]
 async fn test_compile_c_ce() {
+  let sandbox = sandbox::Client::from_global_config().await;
   let res = task::compile(
+    &sandbox,
     &CONFIG.lang["c"],
     proto::File::Memory(proto::MemoryFile {
       content: "ERROR!".as_bytes().to_vec(),
@@ -48,7 +59,8 @@ async fn test_compile_c_ce() {
 
 #[tokio::test]
 async fn test_compile_run_batch() {
-  let res = compile_test_c_prog().await;
+  let sandbox = sandbox::Client::from_global_config().await;
+  let res = compile_test_c_prog(&sandbox).await;
 
   assert_eq!(res.0.status, proto::StatusType::Accepted);
   assert!(res.1.is_ok());
@@ -56,6 +68,7 @@ async fn test_compile_run_batch() {
   let exec_id = res.1.unwrap();
 
   let res = task::judge_batch(
+    &sandbox,
     &CONFIG.lang["c"],
     proto::File::Cached(proto::CachedFile { file_id: exec_id }),
     proto::File::Memory(proto::MemoryFile {
@@ -68,13 +81,7 @@ async fn test_compile_run_batch() {
   assert_eq!(res.0.status, result::Status::Accepted);
   assert!(res.1.is_ok());
 
-  let output = CLIENT
-    .get()
-    .await
-    .as_ref()
-    .file_get(res.1.unwrap())
-    .await
-    .unwrap();
+  let output = sandbox.file_get(res.1.unwrap()).await.unwrap();
 
   assert_eq!(
     output.content,

@@ -3,14 +3,14 @@ pub mod etc;
 pub mod result;
 pub mod sandbox;
 pub mod task;
+pub mod testlib;
 
 #[cfg(test)]
 mod test;
-pub mod testlib;
 
 use std::error::Error;
 
-pub use crate::{args::ARGS, etc::CONFIG, result::Status, sandbox::client::CLIENT};
+pub use crate::{args::ARGS, etc::CONFIG};
 
 #[macro_use]
 extern crate lazy_static;

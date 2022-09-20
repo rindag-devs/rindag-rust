@@ -1,9 +1,14 @@
 use std::{collections::HashMap, time};
 
-use crate::{etc, result, sandbox::proto, CLIENT, CONFIG};
+use crate::{
+  etc, result,
+  sandbox::{self, proto},
+  CONFIG,
+};
 
 /// Compile the given code and returns the compile result.
 pub async fn compile(
+  sandbox: &sandbox::Client,
   lang: &etc::LangCfg,
   code: proto::File,
   mut copy_in: HashMap<String, proto::File>,
@@ -18,8 +23,7 @@ pub async fn compile(
     ..Default::default()
   };
 
-  let client = CLIENT.get().await.as_ref();
-  let rx = client.exec(vec![cmd], vec![]).await;
+  let rx = sandbox.exec(vec![cmd], vec![]).await;
 
   let res = rx.await.unwrap().unwrap();
 
@@ -59,6 +63,7 @@ pub async fn compile(
 /// Run the given executable file on a test case of batch problem (aka. traditional problem),
 /// and then returns the judgement result and the output file.
 pub async fn judge_batch(
+  sandbox: &sandbox::Client,
   lang: &etc::LangCfg,
   proto: proto::File,
   inf: proto::File,
@@ -89,8 +94,7 @@ pub async fn judge_batch(
     ..Default::default()
   };
 
-  let client = CLIENT.get().await.as_ref();
-  let rx = client.exec(vec![cmd], vec![]).await;
+  let rx = sandbox.exec(vec![cmd], vec![]).await;
 
   let res = rx.await.unwrap().unwrap();
 

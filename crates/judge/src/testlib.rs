@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use regex::Regex;
 
-use crate::{result, Status};
+use crate::result;
 
 /// Testlib source code.
 pub static TESTLIB_SOURCE: &str = include_str!("../third_party/testlib/testlib.h");
@@ -12,7 +12,7 @@ pub static TESTLIB_SOURCE: &str = include_str!("../third_party/testlib/testlib.h
 /// If `fail_as_wa` is true,
 /// the output starting with `FAIL` will be treated as `Status::WrongAnswer`,
 /// otherwise it will be treated as `Status::SystemError`.
-pub fn parse_output(output: &str, fail_as_wa: bool) -> (Status, f32, String) {
+pub fn parse_output(output: &str, fail_as_wa: bool) -> (result::Status, f32, String) {
   lazy_static! {
     static ref AC_PAT: Regex = Regex::new(r"(?s)\Aok\s*(.*?)\s*\z").unwrap();
     static ref WA_PAT: Regex = Regex::new(r"(?s)\Awrong answer\s*(.*?)\s*\z").unwrap();
@@ -25,33 +25,37 @@ pub fn parse_output(output: &str, fail_as_wa: bool) -> (Status, f32, String) {
       Regex::new(r"(?m)^[ \t]*(status|score)\((\w+)\)[ \t]*(.*?)\s*$").unwrap();
   }
 
-  let mut ret = (Status::SystemError, 0., result::limit_message(output));
+  let mut ret = (
+    result::Status::SystemError,
+    0.,
+    result::limit_message(output),
+  );
 
   if let Some(cap) = AC_PAT.captures(output) {
     ret = (
-      Status::Accepted,
+      result::Status::Accepted,
       1.,
       result::limit_message(&format!("ac {}", &cap[1])),
     );
   } else if let Some(cap) = WA_PAT.captures(output) {
     ret = (
-      Status::WrongAnswer,
+      result::Status::WrongAnswer,
       0.,
       result::limit_message(&format!("wa {}", &cap[1])),
     );
   } else if let Some(cap) = FAIL_PAT.captures(output) {
     ret = (
       if fail_as_wa {
-        Status::WrongAnswer
+        result::Status::WrongAnswer
       } else {
-        Status::SystemError
+        result::Status::SystemError
       },
       0.,
       result::limit_message(&format!("fail {}", &cap[1])),
     );
   } else if let Some(cap) = PE_PAT.captures(output) {
     ret = (
-      Status::PresentationError,
+      result::Status::PresentationError,
       0.,
       result::limit_message(&format!("pe {}", &cap[1])),
     );
@@ -59,19 +63,19 @@ pub fn parse_output(output: &str, fail_as_wa: bool) -> (Status, f32, String) {
     if let Ok(score) = cap[1].parse::<f32>() {
       if score >= 1. {
         ret = (
-          Status::Accepted,
+          result::Status::Accepted,
           1.,
           result::limit_message(&format!("ac {}", &cap[2])),
         );
       } else if score <= 0. {
         ret = (
-          Status::WrongAnswer,
+          result::Status::WrongAnswer,
           0.,
           result::limit_message(&format!("wa {}", &cap[2])),
         );
       } else {
         ret = (
-          Status::PartiallyCorrect,
+          result::Status::PartiallyCorrect,
           score,
           result::limit_message(&format!("pc {}", &cap[2])),
         );
@@ -81,7 +85,7 @@ pub fn parse_output(output: &str, fail_as_wa: bool) -> (Status, f32, String) {
 
   for cap in CUSTOM_PAT.captures_iter(output) {
     if &cap[1] == "status" {
-      if let Ok(stat) = Status::from_str(&cap[2]) {
+      if let Ok(stat) = result::Status::from_str(&cap[2]) {
         ret.0 = stat;
       }
     } else if &cap[1] == "score" {
