@@ -1,10 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::Semaphore;
 
 use crate::{sandbox::proto, CONFIG};
-
-type ExecResult = Result<proto::Response, tonic::Status>;
 
 /// go-judge client
 pub struct Client {
@@ -103,26 +101,25 @@ impl Client {
     &self,
     cmd: Vec<proto::Cmd>,
     pipe_mapping: Vec<proto::PipeMap>,
-  ) -> oneshot::Receiver<ExecResult> {
+  ) -> Result<proto::Response, tonic::Status> {
     let req = proto::Request {
       cmd: cmd.into_iter().map(|c| c.into()).collect(),
       pipe_mapping,
       ..Default::default()
     };
 
-    let (tx, rx) = oneshot::channel();
-
     let client = self.client.clone();
     let permit = self.semaphore.clone().acquire_owned().await.unwrap();
 
-    tokio::spawn(async move {
-      let _ = tx.send(match client.clone().exec(req).await {
-        Ok(res) => Ok(res.get_ref().clone()),
-        Err(e) => Err(e),
-      });
-      drop(permit);
-    });
+    let res = match client.clone().exec(req).await {
+      Ok(res) => Ok(res.get_ref().clone()),
+      Err(e) => {
+        log::warn!("sandbox grpc error: {}", e.message());
+        Err(e)
+      }
+    };
 
-    return rx;
+    drop(permit);
+    return res;
   }
 }

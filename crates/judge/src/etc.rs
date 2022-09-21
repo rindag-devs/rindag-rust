@@ -40,6 +40,7 @@ impl Default for Cfg {
               "-O2",
               "-w",
               "-fmax-errors=3",
+              "-DONLINE_JUDGE",
             ]
             .iter()
             .map(|&s| s.into())
@@ -60,6 +61,7 @@ impl Default for Cfg {
               "-O2",
               "-w",
               "-fmax-errors=3",
+              "-DONLINE_JUDGE",
             ]
             .iter()
             .map(|&s| s.into())
@@ -74,6 +76,7 @@ impl Default for Cfg {
         env: vec![
           "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
           "HOME=/w".to_string(),
+          "ONLINE_JUDGE=rindag".to_string(),
         ],
         time_limit: time::Duration::from_secs(10),
         memory_limit: 1024 * 1024 * 1024, // 1 GB

@@ -6,10 +6,7 @@ use crate::CONFIG;
 
 pub use self::{
   executor_client::ExecutorClient,
-  request::{
-    file::File, CachedFile, CmdCopyOutFile, CmdType, LocalFile, MemoryFile, PipeCollector, PipeMap,
-    StreamInput, StreamOutput,
-  },
+  request::{file::File, PipeCollector, PipeMap},
   response::{file_error::ErrorType, result::StatusType, FileError, Result},
 };
 
@@ -64,7 +61,7 @@ impl Default for Cmd {
       args: vec![],
       env: c.env.clone(),
       files: vec![
-        File::Memory(MemoryFile { content: vec![] }),
+        File::Memory(vec![].into()),
         File::Pipe(PipeCollector {
           name: "stdout".to_string(),
           max: c.stdout_limit,
@@ -82,15 +79,15 @@ impl Default for Cmd {
       proc_limit: c.process_limit,
       strict_memory_limit: false,
       copy_in: HashMap::new(),
-      copy_out: vec!["stderr".to_string()],
+      copy_out: vec![],
       copy_out_cached: vec![],
     }
   }
 }
 
-impl From<Cmd> for CmdType {
+impl From<Cmd> for request::CmdType {
   fn from(cmd: Cmd) -> Self {
-    CmdType {
+    request::CmdType {
       args: cmd.args,
       env: cmd.env,
       files: cmd
@@ -116,7 +113,7 @@ impl From<Cmd> for CmdType {
         .map(|mut name| {
           let optional = name.ends_with("?");
           optional.then(|| name.pop());
-          CmdCopyOutFile { name, optional }
+          request::CmdCopyOutFile { name, optional }
         })
         .collect(),
       copy_out_cached: cmd
@@ -125,10 +122,48 @@ impl From<Cmd> for CmdType {
         .map(|mut name| {
           let optional = name.ends_with("?");
           optional.then(|| name.pop());
-          CmdCopyOutFile { name, optional }
+          request::CmdCopyOutFile { name, optional }
         })
         .collect(),
       ..Default::default()
     }
+  }
+}
+
+impl From<Vec<u8>> for request::MemoryFile {
+  fn from(c: Vec<u8>) -> Self {
+    Self { content: c }
+  }
+}
+
+impl From<&str> for request::MemoryFile {
+  fn from(c: &str) -> Self {
+    Self {
+      content: c.as_bytes().to_vec(),
+    }
+  }
+}
+
+impl From<String> for request::CachedFile {
+  fn from(c: String) -> Self {
+    Self { file_id: c }
+  }
+}
+
+impl From<String> for request::LocalFile {
+  fn from(c: String) -> Self {
+    Self { src: c }
+  }
+}
+
+impl From<String> for request::StreamInput {
+  fn from(c: String) -> Self {
+    Self { name: c }
+  }
+}
+
+impl From<String> for request::StreamOutput {
+  fn from(c: String) -> Self {
+    Self { name: c }
   }
 }

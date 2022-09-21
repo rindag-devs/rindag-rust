@@ -1,11 +1,8 @@
-#[cfg(test)]
+mod checker;
+mod compile;
+mod generator;
 mod sandbox;
-
-#[cfg(test)]
-mod testlib;
-
-#[cfg(test)]
-mod task;
+mod validator;
 
 #[cfg(test)]
 fn init() {

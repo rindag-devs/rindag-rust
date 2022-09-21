@@ -7,10 +7,12 @@ use crate::sandbox::proto;
 /// Limit the message to a maximum of 'LIMIT' characters.
 pub fn limit_message(s: &str) -> String {
   const LIMIT: usize = 1024;
-  if s.len() <= LIMIT {
+  if s.as_bytes().len() <= LIMIT {
     return s.to_string();
   }
-  return s.chars().take(LIMIT - 3).collect::<String>() + "...";
+  return String::from_utf8_lossy(&s.bytes().into_iter().take(LIMIT - 3).collect::<Vec<_>>())
+    .to_string()
+    + "...";
 }
 
 #[derive(Debug, PartialEq, strum::EnumString, strum::Display, strum::EnumIter)]
@@ -87,25 +89,7 @@ impl From<proto::StatusType> for Status {
   }
 }
 
-/// Compile result for a code.
-#[derive(Debug)]
-pub struct CompileResult {
-  pub status: proto::StatusType,
-  pub stderr: String,
-  pub stdout: String,
-}
-
-impl From<&proto::Result> for CompileResult {
-  fn from(res: &proto::Result) -> Self {
-    return Self {
-      status: res.status(),
-      stderr: limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
-      stdout: limit_message(&String::from_utf8_lossy(&res.files["stdout"])),
-    };
-  }
-}
-
-/// Judge result of a single test case.
+/// Judge result of a single task.
 #[derive(Debug)]
 pub struct JudgeResult {
   /// Judge status.
@@ -121,8 +105,8 @@ pub struct JudgeResult {
   pub stderr: String,
 }
 
-impl From<&proto::Result> for JudgeResult {
-  fn from(res: &proto::Result) -> Self {
+impl From<proto::Result> for JudgeResult {
+  fn from(res: proto::Result) -> Self {
     return Self {
       status: res.status().into(),
       time: time::Duration::from_nanos(res.time),
