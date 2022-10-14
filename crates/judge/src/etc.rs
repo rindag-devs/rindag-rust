@@ -5,9 +5,9 @@ use crate::ARGS;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(default)]
-/// RinDAG server config.
+/// Rindag server config.
 pub struct Cfg {
-  /// The address for the RinDAG http server to listen on.
+  /// The address for the Rindag http server to listen on.
   pub host: String,
 
   /// Judge token secret.

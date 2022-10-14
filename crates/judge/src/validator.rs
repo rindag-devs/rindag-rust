@@ -1,7 +1,7 @@
-use std::{collections::HashMap, time};
+use std::{collections::HashMap, sync::Arc};
 
 use regex::Regex;
-use thiserror::Error;
+use serde::{Deserialize, Serialize};
 
 use crate::{
   etc, result,
@@ -9,47 +9,14 @@ use crate::{
   CONFIG,
 };
 
-/// Error when the validator behaves abnormally.
-///
-/// Such as being compile limit exceed or signaled.
-#[derive(Debug, Error)]
-pub enum Error {
-  #[error(
-    "validator runs failed (status: {status:?}, \
-    time: {time:?}, memory: {memory} bytes, message: {message})"
-  )]
-  Execute {
-    status: proto::StatusType,
-    time: time::Duration,
-    memory: u64,
-    message: String,
-    exit_code: i32,
-  },
-
-  #[error("sandbox error")]
-  Sandbox(#[from] tonic::Status),
-}
-
-impl From<proto::Result> for Error {
-  fn from(res: proto::Result) -> Self {
-    return Self::Execute {
-      status: res.status(),
-      message: result::limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
-      memory: res.memory,
-      time: time::Duration::from_nanos(res.time),
-      exit_code: res.exit_status,
-    };
-  }
-}
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct VariableBounds {
   pub hit_min: bool,
   pub hit_max: bool,
 }
 
 // Parsed testlib validator overview.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct Overview {
   pub variables: HashMap<String, VariableBounds>,
   pub features: HashMap<String, bool>,
@@ -102,14 +69,14 @@ impl sandbox::Client {
   /// This function will return an error if validating abnormally
   /// (e.g. validating time limit exceed or signaled)
   /// or a sandbox internal error was encountered.
-  pub async fn run_validator(
+  pub async fn validate(
     &self,
     lang: &etc::LangCfg,
     args: Vec<String>,
     exec: proto::File,
     inf: proto::File,
     mut copy_in: HashMap<String, proto::File>,
-  ) -> Result<Overview, Error> {
+  ) -> Result<Overview, result::Error> {
     let c = &CONFIG.sandbox;
 
     copy_in.insert(lang.exec.clone(), exec);
@@ -150,7 +117,7 @@ impl sandbox::Client {
         ))),
         _ => Err(res.results[0].clone().into()),
       },
-      Err(e) => Err(Error::Sandbox(e)),
+      Err(e) => Err(result::Error::Sandbox(Arc::new(e))),
     };
   }
 }

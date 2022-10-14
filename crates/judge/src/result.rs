@@ -1,6 +1,8 @@
-use std::time;
+use std::{sync::Arc, time};
 
+use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
+use thiserror::Error;
 
 use crate::sandbox::proto;
 
@@ -52,7 +54,7 @@ pub enum Signal {
 }
 
 /// Judge result status on a single test case.
-#[derive(Debug, PartialEq, strum::EnumString)]
+#[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone)]
 #[strum(serialize_all = "snake_case")]
 pub enum Status {
   Waiting,
@@ -89,8 +91,8 @@ impl From<proto::StatusType> for Status {
   }
 }
 
-/// Judge result of a single task.
-#[derive(Debug)]
+/// Result of a single task.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct JudgeResult {
   /// Judge status.
   pub status: Status,
@@ -103,6 +105,9 @@ pub struct JudgeResult {
 
   /// A cut prefix of stderr.
   pub stderr: String,
+
+  /// Exit code.
+  pub exit_code: i32,
 }
 
 impl From<proto::Result> for JudgeResult {
@@ -111,6 +116,7 @@ impl From<proto::Result> for JudgeResult {
       status: res.status().into(),
       time: time::Duration::from_nanos(res.time),
       memory: res.memory,
+      exit_code: res.exit_status,
       stderr: match res.status() {
         proto::StatusType::Signalled => {
           format!(
@@ -124,6 +130,49 @@ impl From<proto::Result> for JudgeResult {
         proto::StatusType::InternalError => res.error.clone(),
         _ => limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
       },
+    };
+  }
+}
+
+// Error when task does not executed normally (result != Accepted).
+#[derive(Debug, Error, Clone)]
+pub enum Error {
+  #[error(
+    "task executed failed (status: {status:?}, \
+    time: {time:?}, memory: {memory} bytes, stderr: {stderr})"
+  )]
+  Execute {
+    status: Status,
+    time: time::Duration,
+    memory: u64,
+    stderr: String,
+    exit_code: i32,
+  },
+
+  #[error("sandbox error")]
+  Sandbox(#[from] Arc<tonic::Status>),
+}
+
+impl From<proto::Result> for Error {
+  fn from(res: proto::Result) -> Self {
+    return Self::Execute {
+      status: res.status().into(),
+      stderr: limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
+      memory: res.memory,
+      time: time::Duration::from_nanos(res.time),
+      exit_code: res.exit_status,
+    };
+  }
+}
+
+impl From<JudgeResult> for Error {
+  fn from(res: JudgeResult) -> Self {
+    return Self::Execute {
+      status: res.status,
+      stderr: res.stderr,
+      memory: res.memory,
+      time: res.time,
+      exit_code: res.exit_code,
     };
   }
 }

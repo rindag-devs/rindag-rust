@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
 use crate::{
-  compile, result,
+  result,
   sandbox::{self, proto},
   test, CONFIG,
 };
 
-async fn compile_test_c_prog(sandbox: &sandbox::Client) -> Result<String, compile::Error> {
+async fn compile_test_c_prog(sandbox: &sandbox::Client) -> Result<String, result::Error> {
   sandbox
     .compile(
       &CONFIG.lang["c"],
+      vec![],
       proto::File::Memory(
         "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}".into(),
       ),
@@ -33,6 +34,7 @@ async fn test_ce() {
   let res = sandbox
     .compile(
       &CONFIG.lang["c"],
+      vec![],
       proto::File::Memory("ERROR!".into()),
       HashMap::new(),
     )
@@ -51,6 +53,7 @@ async fn test_ok() {
   let res = sandbox
     .judge_batch(
       &CONFIG.lang["c"],
+      [].into(),
       proto::File::Cached(exec_id.into()),
       proto::File::Memory("998244343".into()),
       HashMap::new(),

@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use crate::{
+  builtin,
   sandbox::{self, proto},
-  test, testlib, validator, CONFIG,
+  test, validator, CONFIG,
 };
 
 #[tokio::test]
@@ -14,6 +15,7 @@ async fn test_val_a_plus_b() {
   let exec_id = sandbox
     .compile(
       &CONFIG.lang["cpp"],
+      vec![],
       proto::File::Memory(
         "
         #include\"testlib.h\"
@@ -36,7 +38,13 @@ async fn test_val_a_plus_b() {
       ),
       [(
         "testlib.h".to_string(),
-        proto::File::Memory(testlib::TESTLIB_SOURCE.into()),
+        proto::File::Memory(
+          builtin::Testlib::get("testlib.h")
+            .unwrap()
+            .data
+            .to_vec()
+            .into(),
+        ),
       )]
       .into(),
     )
@@ -45,7 +53,7 @@ async fn test_val_a_plus_b() {
 
   assert_eq!(
     sandbox
-      .run_validator(
+      .validate(
         &CONFIG.lang["cpp"],
         vec!["--group".to_string(), "even_a_and_b".to_string()],
         proto::File::Cached(exec_id.clone().into()),
@@ -78,7 +86,7 @@ async fn test_val_a_plus_b() {
 
   assert_eq!(
     sandbox
-      .run_validator(
+      .validate(
         &CONFIG.lang["cpp"],
         vec![],
         proto::File::Cached(exec_id.clone().into()),
@@ -110,7 +118,7 @@ async fn test_val_a_plus_b() {
   );
 
   assert!(sandbox
-    .run_validator(
+    .validate(
       &CONFIG.lang["cpp"],
       vec![],
       proto::File::Cached(exec_id.clone().into()),
@@ -121,7 +129,7 @@ async fn test_val_a_plus_b() {
     .is_err());
 
   assert!(sandbox
-    .run_validator(
+    .validate(
       &CONFIG.lang["cpp"],
       vec!["--group".to_string(), "even_a_and_b".to_string()],
       proto::File::Cached(exec_id.clone().into()),

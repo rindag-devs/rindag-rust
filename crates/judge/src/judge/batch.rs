@@ -17,6 +17,7 @@ impl sandbox::Client {
   pub async fn judge_batch(
     &self,
     lang: &etc::LangCfg,
+    args: Vec<String>,
     exec: proto::File,
     inf: proto::File,
     mut copy_in: HashMap<String, proto::File>,
@@ -26,7 +27,7 @@ impl sandbox::Client {
     copy_in.insert(lang.exec.clone(), exec);
 
     let cmd = proto::Cmd {
-      args: lang.run_cmd.clone(),
+      args: [lang.run_cmd.clone(), args].concat(),
       files: vec![
         inf,
         proto::File::Pipe(proto::PipeCollector {
@@ -62,6 +63,7 @@ impl sandbox::Client {
           time: time::Duration::ZERO,
           memory: 0,
           stderr: format!("Sandbox error: {}", e),
+          exit_code: -1,
         },
         None,
       ),

@@ -1,44 +1,9 @@
-use std::{collections::HashMap, time};
-
-use thiserror::Error;
+use std::{collections::HashMap, sync::Arc};
 
 use crate::{
   etc, result,
   sandbox::{self, proto},
 };
-
-/// Error when the generator behaves abnormally.
-///
-/// Such as being compile limit exceed or signaled.
-#[derive(Debug, Error)]
-pub enum Error {
-  #[error(
-    "generator runs failed (status: {status:?}, \
-    time: {time:?}, memory: {memory} bytes, message: {message})"
-  )]
-  Execute {
-    status: proto::StatusType,
-    time: time::Duration,
-    memory: u64,
-    message: String,
-    exit_code: i32,
-  },
-
-  #[error("sandbox error")]
-  Sandbox(#[from] tonic::Status),
-}
-
-impl From<proto::Result> for Error {
-  fn from(res: proto::Result) -> Self {
-    return Self::Execute {
-      status: res.status(),
-      message: result::limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
-      memory: res.memory,
-      time: time::Duration::from_nanos(res.time),
-      exit_code: res.exit_status,
-    };
-  }
-}
 
 impl sandbox::Client {
   /// Run the generator and returns the file id of generated output.
@@ -53,13 +18,13 @@ impl sandbox::Client {
   ///
   /// This function will return an error if the generating failed or
   /// a sandbox internal error was encountered.
-  pub async fn run_generator(
+  pub async fn generate(
     &self,
     lang: &etc::LangCfg,
     args: Vec<String>,
     exec: proto::File,
     mut copy_in: HashMap<String, proto::File>,
-  ) -> Result<String, Error> {
+  ) -> Result<String, result::Error> {
     copy_in.insert(lang.exec.clone(), exec);
 
     let cmd = proto::Cmd {
@@ -74,7 +39,7 @@ impl sandbox::Client {
         proto::StatusType::Accepted => Ok(res.results[0].file_ids["stdout"].clone()),
         _ => Err(res.results[0].clone().into()),
       },
-      Err(e) => Err(Error::Sandbox(e)),
+      Err(e) => Err(result::Error::Sandbox(Arc::new(e))),
     };
   }
 }

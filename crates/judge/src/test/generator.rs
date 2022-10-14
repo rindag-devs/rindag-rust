@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
+  builtin,
   etc::CONFIG,
   sandbox::{self, proto},
-  test, testlib,
+  test,
 };
 
 #[tokio::test]
@@ -15,6 +16,7 @@ async fn test_simple() {
   let exec_id = sandbox
     .compile(
       &CONFIG.lang["cpp"],
+      vec![],
       proto::File::Memory(
         "
         #include\"testlib.h\"
@@ -29,7 +31,13 @@ async fn test_simple() {
       ),
       [(
         "testlib.h".to_string(),
-        proto::File::Memory(testlib::TESTLIB_SOURCE.into()),
+        proto::File::Memory(
+          builtin::Testlib::get("testlib.h")
+            .unwrap()
+            .data
+            .to_vec()
+            .into(),
+        ),
       )]
       .into(),
     )
@@ -37,7 +45,7 @@ async fn test_simple() {
     .unwrap();
 
   let file_id = sandbox
-    .run_generator(
+    .generate(
       &CONFIG.lang["cpp"],
       vec!["-n".to_string(), "100".to_string()],
       proto::File::Cached(exec_id.into()),

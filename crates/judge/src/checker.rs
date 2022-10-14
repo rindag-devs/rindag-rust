@@ -1,30 +1,12 @@
-use std::{borrow::Cow, collections::HashMap, str::FromStr, time};
+use std::{collections::HashMap, str::FromStr, time};
 
 use regex::Regex;
-use rust_embed::RustEmbed;
 use thiserror::Error;
 
 use crate::{
   etc, result,
   sandbox::{self, proto},
 };
-
-/// Builtin checkers.
-#[derive(RustEmbed)]
-#[folder = "third_party/testlib/checkers"]
-pub struct Builtin;
-
-impl Builtin {
-  pub fn get_checker(name: &str) -> Option<Cow<'static, [u8]>> {
-    Some(Self::get(&format!("{}.cpp", name))?.data)
-  }
-
-  pub fn get_checker_as_file(name: &str) -> Option<proto::File> {
-    Some(proto::File::Memory(
-      Self::get_checker(name)?.to_vec().into(),
-    ))
-  }
-}
 
 /// Parsed testlib checker output.
 #[derive(Debug, PartialEq)]
@@ -176,7 +158,7 @@ impl sandbox::Client {
   /// Run the checker with input, output and answer file.
   ///
   /// Returns the parsed testlib output.
-  pub async fn run_checker(
+  pub async fn check(
     &self,
     lang: &etc::LangCfg,
     args: Vec<String>,

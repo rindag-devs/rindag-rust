@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use crate::{
-  checker::{self, Output},
+  builtin,
+  checker::Output,
   result,
   sandbox::{self, proto},
-  testlib, CONFIG,
+  CONFIG,
 };
 
 #[test]
@@ -58,15 +59,28 @@ fn test_parse_output() {
 #[tokio::test]
 async fn test_builtin_checker() {
   let sandbox = sandbox::Client::from_global_config().await;
-  let checker = checker::Builtin::get_checker_as_file("ncmp").unwrap();
+  let checker = proto::File::Memory(
+    builtin::Checker::get("ncmp.cpp")
+      .unwrap()
+      .data
+      .to_vec()
+      .into(),
+  );
 
   let exec_id = sandbox
     .compile(
       &CONFIG.lang["cpp"],
+      vec![],
       checker,
       [(
         "testlib.h".to_string(),
-        proto::File::Memory(testlib::TESTLIB_SOURCE.into()),
+        proto::File::Memory(
+          builtin::Testlib::get("testlib.h")
+            .unwrap()
+            .data
+            .to_vec()
+            .into(),
+        ),
       )]
       .into(),
     )
@@ -74,7 +88,7 @@ async fn test_builtin_checker() {
     .unwrap();
 
   let res = sandbox
-    .run_checker(
+    .check(
       &CONFIG.lang["cpp"],
       vec![],
       proto::File::Cached(exec_id.into()),
