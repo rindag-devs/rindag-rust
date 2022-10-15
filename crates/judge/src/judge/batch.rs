@@ -21,6 +21,8 @@ impl sandbox::Client {
     exec: proto::File,
     inf: proto::File,
     mut copy_in: HashMap<String, proto::File>,
+    time_limit: time::Duration,
+    memory_limit: u64,
   ) -> (result::JudgeResult, Option<String>) {
     let c = &CONFIG.sandbox;
 
@@ -44,6 +46,8 @@ impl sandbox::Client {
       copy_in,
       copy_out: vec!["stderr".to_string()],
       copy_out_cached: vec!["stdout".to_string()],
+      time_limit,
+      memory_limit,
       ..Default::default()
     };
 

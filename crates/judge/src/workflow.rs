@@ -4,6 +4,7 @@ use std::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex, RwLock,
   },
+  time,
 };
 
 use async_trait::async_trait;
@@ -13,6 +14,7 @@ use futures::{
   Future,
 };
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DurationNanoSeconds};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -521,6 +523,7 @@ impl Cmd for ValidateCmd {
   }
 }
 
+#[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct JudgeBatchCmd {
   pub lang: String,
@@ -529,6 +532,9 @@ pub struct JudgeBatchCmd {
   pub inf: String,
   pub copy_in: HashMap<String, String>,
   pub copy_out: String,
+  #[serde_as(as = "DurationNanoSeconds<u64>")]
+  pub time_limit: time::Duration,
+  pub memory_limit: u64,
 }
 
 #[async_trait]
@@ -574,7 +580,15 @@ impl Cmd for JudgeBatchCmd {
     }
 
     let (res, copy_out) = sandbox
-      .judge_batch(lang, self.args.clone(), exec, inf, copy_in)
+      .judge_batch(
+        lang,
+        self.args.clone(),
+        exec,
+        inf,
+        copy_in,
+        self.time_limit,
+        self.memory_limit,
+      )
       .await;
 
     if res.status != result::Status::Accepted {

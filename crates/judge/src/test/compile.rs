@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time};
 
 use crate::{
   result,
@@ -55,8 +55,10 @@ async fn test_ok() {
       &CONFIG.lang["c"],
       [].into(),
       proto::File::Cached(exec_id.into()),
-      proto::File::Memory("998244343".into()),
+      proto::File::Memory("998244353".into()),
       HashMap::new(),
+      time::Duration::from_secs(1),
+      64 * 1024 * 1024,
     )
     .await;
 

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time};
 
 use crate::{sandbox, test, workflow};
 
@@ -65,6 +65,8 @@ async fn test_generate_a_plus_b() {
         inf: "1.in".to_string(),
         copy_in: [].into(),
         copy_out: "1.ans".to_string(),
+        time_limit: time::Duration::from_secs(1),
+        memory_limit: 64 * 1024 * 1024,
       }),
       Box::new(workflow::GenerateCmd {
         lang: "cpp".to_string(),

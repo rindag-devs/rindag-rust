@@ -34,7 +34,6 @@ serde_bytes = "0.11"
 async-trait = "0.1"
 typetag = "0.2"
 futures = "0.3"
-wg = "0.1"
 dyn-clone = "1"
 
 [dependencies.uuid]
