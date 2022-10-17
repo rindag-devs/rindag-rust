@@ -76,7 +76,7 @@ async fn test_generate_a_plus_b() {
           .collect(),
         exec: "generator".to_string(),
         copy_in: [].into(),
-        copy_out: "1.in".to_string(),
+        generated: "1.in".to_string(),
       }),
       Box::new(workflow::ValidateCmd {
         lang: "cpp".to_string(),
@@ -91,28 +91,28 @@ async fn test_generate_a_plus_b() {
         args: vec![],
         code: "generator.cpp".to_string(),
         copy_in: [("testlib.h".to_string(), "testlib.h".to_string())].into(),
-        copy_out: "generator".to_string(),
+        exec: "generator".to_string(),
       }),
       Box::new(workflow::CompileCmd {
         lang: "cpp".to_string(),
         args: vec![],
         code: "std.cpp".to_string(),
         copy_in: [].into(),
-        copy_out: "std".to_string(),
+        exec: "std".to_string(),
       }),
       Box::new(workflow::CompileCmd {
         lang: "cpp".to_string(),
         args: vec![],
         code: "validator.cpp".to_string(),
         copy_in: [("testlib.h".to_string(), "testlib.h".to_string())].into(),
-        copy_out: "validator".to_string(),
+        exec: "validator".to_string(),
       }),
     ],
     copy_out: ["1.ans".to_string(), "1.log".to_string()].into(),
   };
 
   let sandbox = Arc::new(sandbox::Client::from_global_config().await);
-  assert!(sandbox.exec_workflow(Arc::new(w)).await.is_ok());
+  assert!(sandbox.exec_workflow(&w).await.is_ok());
 }
 
 #[tokio::test]
@@ -131,28 +131,28 @@ async fn test_duplicate_file() {
         args: vec![],
         code: "a.c".to_string(),
         copy_in: [].into(),
-        copy_out: "b.c".to_string(),
+        exec: "b.c".to_string(),
       }),
       Box::new(workflow::CompileCmd {
         lang: "c".to_string(),
         args: vec![],
         code: "b.c".to_string(),
         copy_in: [].into(),
-        copy_out: "c.c".to_string(),
+        exec: "c.c".to_string(),
       }),
       Box::new(workflow::CompileCmd {
         lang: "c".to_string(),
         args: vec![],
         code: "c.c".to_string(),
         copy_in: [].into(),
-        copy_out: "b.c".to_string(),
+        exec: "b.c".to_string(),
       }),
     ],
     copy_out: [].into(),
   };
 
   let sandbox = Arc::new(sandbox::Client::from_global_config().await);
-  let err = sandbox.exec_workflow(Arc::new(w)).await.unwrap_err();
+  let err = sandbox.exec_workflow(&w).await.unwrap_err();
   if let workflow::Error::Parse(workflow::ParseError::DuplicateFile(err)) = err {
     assert_eq!(
       err,
