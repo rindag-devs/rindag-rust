@@ -1,6 +1,6 @@
 use std::{sync::Arc, time};
 
-use crate::{sandbox, test, workflow};
+use crate::{file, sandbox, test, validator, workflow};
 
 #[tokio::test]
 async fn test_generate_a_plus_b() {
@@ -11,8 +11,9 @@ async fn test_generate_a_plus_b() {
   #include <iostream>
   signed main(int argc,char**argv){
     registerGen(argc,argv,1);
-    int n=opt<int>(\"n\");
-    std::cout<<rnd.next(1,n)<<' '<<rnd.next(1,n)<<'\\n';
+    int a=opt<int>(\"a\");
+    int b=opt<int>(\"b\");
+    std::cout<<a<<' '<<b<<'\\n';
   }
   ";
 
@@ -41,19 +42,19 @@ async fn test_generate_a_plus_b() {
     copy_in: [
       (
         "generator.cpp".to_string(),
-        workflow::File::Memory(gen_code.as_bytes().to_vec()),
+        file::File::Memory(gen_code.as_bytes().to_vec()),
       ),
       (
         "std.cpp".to_string(),
-        workflow::File::Memory(std_code.as_bytes().to_vec()),
+        file::File::Memory(std_code.as_bytes().to_vec()),
       ),
       (
         "validator.cpp".to_string(),
-        workflow::File::Memory(val_code.as_bytes().to_vec()),
+        file::File::Memory(val_code.as_bytes().to_vec()),
       ),
       (
         "testlib.h".to_string(),
-        workflow::File::Builtin("testlib:testlib.h".parse().unwrap()),
+        file::File::Builtin("testlib:testlib.h".parse().unwrap()),
       ),
     ]
     .into(),
@@ -70,7 +71,7 @@ async fn test_generate_a_plus_b() {
       }),
       Box::new(workflow::GenerateCmd {
         lang: "cpp".to_string(),
-        args: ["--test", "main", "--group", "1", "-n", "100", "-m", "100"]
+        args: ["--test", "main", "--group", "1", "-a", "1", "-b", "100"]
           .iter()
           .map(|&s| s.into())
           .collect(),
@@ -108,11 +109,59 @@ async fn test_generate_a_plus_b() {
         exec: "validator".to_string(),
       }),
     ],
-    copy_out: ["1.ans".to_string(), "1.log".to_string()].into(),
+    copy_out: ["1.in".to_string(), "1.ans".to_string(), "1.log".to_string()].into(),
   };
 
   let sandbox = Arc::new(sandbox::Client::from_global_config().await);
-  assert!(sandbox.exec_workflow(&w).await.is_ok());
+  let res = sandbox.exec_workflow(&w).await.unwrap();
+
+  assert_eq!(
+    sandbox
+      .file_get(res["1.in"].to_string())
+      .await
+      .unwrap()
+      .content,
+    "1 100\n".as_bytes().to_vec()
+  );
+  assert_eq!(
+    sandbox
+      .file_get(res["1.ans"].to_string())
+      .await
+      .unwrap()
+      .content,
+    "101\n".as_bytes().to_vec()
+  );
+  let val_log: validator::Overview = bson::from_slice(
+    &sandbox
+      .file_get(res["1.log"].to_string())
+      .await
+      .unwrap()
+      .content,
+  )
+  .unwrap();
+  assert_eq!(
+    val_log,
+    validator::Overview {
+      variables: [
+        (
+          "a".to_string(),
+          validator::VariableBounds {
+            hit_min: true,
+            hit_max: false
+          }
+        ),
+        (
+          "b".to_string(),
+          validator::VariableBounds {
+            hit_min: false,
+            hit_max: true
+          }
+        ),
+      ]
+      .into(),
+      features: [].into()
+    }
+  )
 }
 
 #[tokio::test]
@@ -122,7 +171,7 @@ async fn test_duplicate_file() {
   let w = workflow::Workflow {
     copy_in: [(
       "a.c".to_string(),
-      workflow::File::Memory("a".as_bytes().to_vec()),
+      file::File::Memory("a".as_bytes().to_vec()),
     )]
     .into(),
     tasks: vec![

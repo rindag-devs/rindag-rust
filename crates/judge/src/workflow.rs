@@ -1,11 +1,11 @@
 use std::{
   collections::{HashMap, HashSet},
+  fmt::Debug,
   sync::Arc,
   time,
 };
 
 use async_trait::async_trait;
-use dyn_clone::DynClone;
 use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationNanoSeconds};
@@ -13,7 +13,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 
 use crate::{
-  builtin, result,
+  file, result,
   sandbox::{self, proto},
   CONFIG,
 };
@@ -21,11 +21,11 @@ use crate::{
 /// A workflow to a set of tasks (like build a problem or do a stress).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Workflow {
-  pub copy_in: HashMap<String, File>,
+  pub copy_in: HashMap<String, file::File>,
 
   pub tasks: Vec<Box<dyn Cmd>>,
 
-  pub copy_out: Vec<String>,
+  pub copy_out: HashSet<String>,
 }
 
 impl Workflow {
@@ -50,7 +50,6 @@ impl Workflow {
     let mut inf_receivers = Vec::with_capacity(n);
     let mut ouf_senders = Vec::with_capacity(n);
     let mut global_inf_senders = HashMap::new();
-    let mut global_ouf_receivers = HashMap::new();
     for _ in 0..n {
       inf_receivers.push(HashMap::new());
       ouf_senders.push(HashMap::new());
@@ -103,7 +102,6 @@ impl Workflow {
             .into(),
           );
         }
-        dbg!(inf.to_string());
         inf_receivers[i].insert(inf.to_string(), file_receivers[inf].clone());
       }
     }
@@ -113,12 +111,11 @@ impl Workflow {
       if !providers.contains_key(ouf) {
         return Err(InvalidFileError::Global(ouf.to_string()).into());
       }
-      global_ouf_receivers.insert(ouf.to_string(), file_receivers[ouf].clone());
     }
 
     return Ok((
       global_inf_senders,
-      global_ouf_receivers,
+      file_receivers,
       ouf_senders,
       inf_receivers,
     ));
@@ -130,7 +127,7 @@ impl sandbox::Client {
     self: &Arc<Self>,
     wf: &Workflow,
   ) -> Result<HashMap<String, String>, Error> {
-    let (mut global_inf_senders, global_ouf_receivers, mut ouf_senders, mut inf_receivers) = wf
+    let (mut global_inf_senders, mut file_receivers, mut ouf_senders, mut inf_receivers) = wf
       .parse()
       .map_or_else(|e| Err(Error::Parse(e)), |g| Ok(g))?;
 
@@ -138,8 +135,8 @@ impl sandbox::Client {
     for inf in &wf.copy_in {
       let sender = global_inf_senders.remove(inf.0).unwrap();
       let content = match inf.1 {
-        File::Memory(m) => m.to_vec(),
-        File::Builtin(b) => b.content.to_vec(),
+        file::File::Memory(m) => m.to_vec(),
+        file::File::Builtin(b) => b.content.to_vec(),
       };
       let file_id = self
         .file_add(content)
@@ -164,29 +161,46 @@ impl sandbox::Client {
         return Ok(());
       });
     }
-    return match futures::future::try_join_all(coroutines).await {
-      Ok(_) => Ok(
-        stream::iter(global_ouf_receivers)
-          .then(|mut f| async move {
-            (f.0, {
-              f.1.changed().await.unwrap();
-              (*f.1.borrow()).clone()
-            })
-          })
-          .collect()
-          .await,
-      ),
-      Err(e) => Err(e),
-    };
-  }
-}
+    futures::future::try_join_all(coroutines).await?;
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum File {
-  #[serde(with = "serde_bytes")]
-  Memory(Vec<u8>),
-  Builtin(builtin::File),
+    let res = stream::iter(&mut file_receivers)
+      .then(|f| async move {
+        (f.0.to_string(), {
+          f.1.changed().await.unwrap();
+          (*f.1.borrow()).clone()
+        })
+      })
+      .collect()
+      .await;
+
+    let mut files_to_clean = HashSet::new();
+
+    for (f, _) in &wf.copy_in {
+      if !wf.copy_out.contains(f) {
+        log::debug!("file to delete: {}", &f);
+        files_to_clean.insert((*file_receivers[f].clone().borrow()).clone());
+      }
+    }
+
+    for task in &wf.tasks {
+      for f in task.get_copy_out() {
+        if !wf.copy_out.contains(&f) {
+          log::debug!("file to delete: {}", &f);
+          files_to_clean.insert((*file_receivers[&f].clone().borrow()).clone());
+        }
+      }
+    }
+
+    // Clean unused file.
+    stream::iter(files_to_clean)
+      .for_each(|f| async {
+        log::debug!("file deleted: {}", &f);
+        _ = self.file_delete(f).await;
+      })
+      .await;
+
+    return Ok(res);
+  }
 }
 
 #[derive(Debug, Error, Clone)]
@@ -203,7 +217,6 @@ pub enum Error {
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ParseError {
   #[error("invalid copy in file")]
-  // InvalidFile { index: usize, name: String },
   InvalidFile(#[from] InvalidFileError),
   #[error("duplicate file")]
   DuplicateFile(#[from] DuplicateFileError),
@@ -242,7 +255,7 @@ pub enum ExecuteError {
 
 #[async_trait]
 #[typetag::serde(tag = "type")]
-pub trait Cmd: std::fmt::Debug + Sync + Send + DynClone {
+pub trait Cmd: std::fmt::Debug + Sync + Send {
   /// Get all copy in files of the command.
   fn get_copy_in(&self) -> HashSet<String>;
 
@@ -257,7 +270,6 @@ pub trait Cmd: std::fmt::Debug + Sync + Send + DynClone {
     copy_out_senders: HashMap<String, watch::Sender<String>>,
   ) -> Result<(), ExecuteError>;
 }
-dyn_clone::clone_trait_object!(Cmd);
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CompileCmd {
@@ -313,13 +325,14 @@ impl Cmd for CompileCmd {
       .collect()
       .await;
 
-    log::info!("compile for {} start", &self.exec);
+    log::debug!("compile for {} start", &self.exec);
 
     let res = sandbox
       .compile(lang, self.args.clone(), code, copy_in)
       .await?;
     _ = copy_out_senders.remove(&self.exec).unwrap().send(res);
-    log::info!("compile for {} finished", &self.exec);
+
+    log::debug!("compile for {} finished", &self.exec);
 
     return Ok(());
   }
@@ -465,12 +478,7 @@ impl Cmd for ValidateCmd {
       .await?;
 
     let report_id = sandbox
-      .file_add(
-        serde_json::to_string(&overview)
-          .unwrap()
-          .as_bytes()
-          .to_vec(),
-      )
+      .file_add(bson::to_vec(&overview).unwrap())
       .await
       .map_or_else(
         |e| Err(ExecuteError::Runtime(Arc::new(e).into())),

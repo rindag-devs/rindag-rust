@@ -6,6 +6,7 @@ pub mod builtin;
 pub mod checker;
 pub mod compile;
 pub mod etc;
+pub mod file;
 pub mod generator;
 pub mod judge;
 pub mod result;

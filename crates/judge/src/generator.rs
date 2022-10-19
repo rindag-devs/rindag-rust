@@ -37,7 +37,12 @@ impl sandbox::Client {
     return match self.exec(vec![cmd], vec![]).await {
       Ok(res) => match res.results[0].status() {
         proto::StatusType::Accepted => Ok(res.results[0].file_ids["stdout"].clone()),
-        _ => Err(res.results[0].clone().into()),
+        _ => {
+          if let Some(stdout_id) = res.results[0].file_ids.get("stdout") {
+            _ = self.file_delete(stdout_id.to_string()).await;
+          }
+          Err(res.results[0].clone().into())
+        }
       },
       Err(e) => Err(result::Error::Sandbox(Arc::new(e))),
     };

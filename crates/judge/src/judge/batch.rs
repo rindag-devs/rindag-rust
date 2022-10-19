@@ -57,7 +57,12 @@ impl sandbox::Client {
         result::JudgeResult::from(res.results[0].clone()),
         match res.results[0].status() {
           proto::StatusType::Accepted => Some(res.results[0].file_ids["stdout"].clone()),
-          _ => None,
+          _ => {
+            if let Some(stdout_id) = res.results[0].file_ids.get("stdout") {
+              _ = self.file_delete(stdout_id.to_string()).await;
+            }
+            None
+          }
         },
       ),
       // A sandbox error encountered.
