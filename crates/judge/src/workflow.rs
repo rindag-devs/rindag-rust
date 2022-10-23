@@ -1,21 +1,25 @@
 use std::{
   collections::{HashMap, HashSet},
   fmt::Debug,
+  mem,
+  str::FromStr,
   sync::Arc,
   time,
 };
 
 use async_trait::async_trait;
-use futures::stream::{self, StreamExt};
+use futures::{
+  stream::{self, StreamExt},
+  TryStreamExt,
+};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationNanoSeconds};
 use thiserror::Error;
 use tokio::sync::watch;
 
 use crate::{
-  file, result,
+  etc, file, result,
   sandbox::{self, proto},
-  CONFIG,
 };
 
 /// A workflow to a set of tasks (like build a problem or do a stress).
@@ -120,39 +124,34 @@ impl Workflow {
       inf_receivers,
     ));
   }
-}
 
-impl sandbox::Client {
-  pub async fn exec_workflow(
-    self: &Arc<Self>,
-    wf: &Workflow,
+  pub async fn exec(
+    &self,
+    sandbox: Arc<sandbox::Client>,
   ) -> Result<HashMap<String, String>, Error> {
-    let (mut global_inf_senders, mut file_receivers, mut ouf_senders, mut inf_receivers) = wf
+    let (mut global_inf_senders, mut file_receivers, mut ouf_senders, mut inf_receivers) = self
       .parse()
       .map_or_else(|e| Err(Error::Parse(e)), |g| Ok(g))?;
 
     // Upload files to sandbox.
-    for inf in &wf.copy_in {
-      let sender = global_inf_senders.remove(inf.0).unwrap();
-      let content = match inf.1 {
-        file::File::Memory(m) => m.to_vec(),
-        file::File::Builtin(b) => b.content.to_vec(),
-      };
-      let file_id = self
+    for inf in &self.copy_in {
+      let content = inf.1.get_content();
+      let file_id = sandbox
         .file_add(content)
         .await
-        .map_or_else(|e| Err(Error::Sandbox(Arc::new(e))), |x| Ok(x))?;
+        .map_or_else(|e| Err(Error::Sandbox(e)), |x| Ok(x))?;
+      let sender = global_inf_senders.remove(inf.0).unwrap();
       _ = sender.send(file_id);
     }
 
-    let mut coroutines = Vec::new();
-    for (i, task) in wf.tasks.iter().enumerate() {
-      let ir = std::mem::replace(&mut inf_receivers[i], HashMap::new());
-      let os = std::mem::replace(&mut ouf_senders[i], HashMap::new());
-      let this = self.clone();
+    let coroutines = futures::stream::FuturesUnordered::new();
+    for (i, task) in self.tasks.iter().enumerate() {
+      let ir = mem::replace(&mut inf_receivers[i], HashMap::new());
+      let os = mem::replace(&mut ouf_senders[i], HashMap::new());
+      let sandbox = sandbox.clone();
       let task = task.clone();
       coroutines.push(async move {
-        if let Err(e) = task.exec(this.as_ref(), ir, os).await {
+        if let Err(e) = task.exec(sandbox.as_ref(), ir, os).await {
           return Err(Error::Execute {
             index: i,
             source: e,
@@ -161,7 +160,7 @@ impl sandbox::Client {
         return Ok(());
       });
     }
-    futures::future::try_join_all(coroutines).await?;
+    coroutines.try_collect().await?;
 
     let res = stream::iter(&mut file_receivers)
       .then(|f| async move {
@@ -175,16 +174,16 @@ impl sandbox::Client {
 
     let mut files_to_clean = HashSet::new();
 
-    for (f, _) in &wf.copy_in {
-      if !wf.copy_out.contains(f) {
+    for (f, _) in &self.copy_in {
+      if !self.copy_out.contains(f) {
         log::debug!("file to delete: {}", &f);
         files_to_clean.insert((*file_receivers[f].clone().borrow()).clone());
       }
     }
 
-    for task in &wf.tasks {
+    for task in &self.tasks {
       for f in task.get_copy_out() {
-        if !wf.copy_out.contains(&f) {
+        if !self.copy_out.contains(&f) {
           log::debug!("file to delete: {}", &f);
           files_to_clean.insert((*file_receivers[&f].clone().borrow()).clone());
         }
@@ -195,7 +194,7 @@ impl sandbox::Client {
     stream::iter(files_to_clean)
       .for_each(|f| async {
         log::debug!("file deleted: {}", &f);
-        _ = self.file_delete(f).await;
+        _ = sandbox.file_delete(f).await;
       })
       .await;
 
@@ -210,7 +209,7 @@ pub enum Error {
   #[error("execute error at {index}")]
   Execute { index: usize, source: ExecuteError },
   #[error("sandbox error")]
-  Sandbox(Arc<tonic::Status>),
+  Sandbox(#[from] tonic::Status),
 }
 
 /// Error when parsing.
@@ -247,8 +246,8 @@ pub enum DuplicateFileError {
 /// Errors when command execute.
 #[derive(Debug, Error, Clone)]
 pub enum ExecuteError {
-  #[error("invalid lang: {0}")]
-  InvalidLang(String),
+  #[error("invalid lang")]
+  InvalidLang(#[from] etc::InvalidLangError),
   #[error("runtime error")]
   Runtime(#[from] result::Error),
 }
@@ -301,10 +300,12 @@ impl Cmd for CompileCmd {
     mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
     mut copy_out_senders: HashMap<String, watch::Sender<String>>,
   ) -> Result<(), ExecuteError> {
-    let lang = CONFIG
-      .lang
-      .get(&self.lang)
-      .map_or(Err(ExecuteError::InvalidLang(self.lang.clone())), |x| Ok(x))?;
+    let lang = etc::LangCfg::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+        lang: self.lang.clone(),
+      })),
+      |x| Ok(x),
+    )?;
     let code = {
       let mut rx = copy_in_receivers.remove(&self.code).unwrap();
       rx.changed().await.unwrap();
@@ -328,7 +329,7 @@ impl Cmd for CompileCmd {
     log::debug!("compile for {} start", &self.exec);
 
     let res = sandbox
-      .compile(lang, self.args.clone(), code, copy_in)
+      .compile(&lang, self.args.clone(), code, copy_in)
       .await?;
     _ = copy_out_senders.remove(&self.exec).unwrap().send(res);
 
@@ -368,10 +369,12 @@ impl Cmd for GenerateCmd {
     mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
     mut copy_out_senders: HashMap<String, watch::Sender<String>>,
   ) -> Result<(), ExecuteError> {
-    let lang = CONFIG
-      .lang
-      .get(&self.lang)
-      .map_or(Err(ExecuteError::InvalidLang(self.lang.clone())), |x| Ok(x))?;
+    let lang = etc::LangCfg::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+        lang: self.lang.clone(),
+      })),
+      |x| Ok(x),
+    )?;
     let exec = {
       let mut rx = copy_in_receivers.remove(&self.exec).unwrap();
       rx.changed().await.unwrap();
@@ -393,7 +396,7 @@ impl Cmd for GenerateCmd {
       .await;
 
     let res = sandbox
-      .generate(lang, self.args.clone(), exec, copy_in)
+      .generate(&lang, self.args.clone(), exec, copy_in)
       .await?;
     _ = copy_out_senders.remove(&self.generated).unwrap().send(res);
 
@@ -443,10 +446,12 @@ impl Cmd for ValidateCmd {
     mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
     mut copy_out_senders: HashMap<String, watch::Sender<String>>,
   ) -> Result<(), ExecuteError> {
-    let lang = CONFIG
-      .lang
-      .get(&self.lang)
-      .map_or(Err(ExecuteError::InvalidLang(self.lang.clone())), |x| Ok(x))?;
+    let lang = etc::LangCfg::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+        lang: self.lang.clone(),
+      })),
+      |x| Ok(x),
+    )?;
     let exec = {
       let mut rx = copy_in_receivers.remove(&self.exec).unwrap();
       rx.changed().await.unwrap();
@@ -474,16 +479,13 @@ impl Cmd for ValidateCmd {
       .await;
 
     let overview = sandbox
-      .validate(lang, self.args.clone(), exec, inf, copy_in)
+      .validate(&lang, self.args.clone(), exec, inf, copy_in)
       .await?;
 
     let report_id = sandbox
       .file_add(bson::to_vec(&overview).unwrap())
       .await
-      .map_or_else(
-        |e| Err(ExecuteError::Runtime(Arc::new(e).into())),
-        |x| Ok(x),
-      )?;
+      .map_or_else(|e| Err(ExecuteError::Runtime(e.into())), |x| Ok(x))?;
 
     _ = copy_out_senders
       .remove(&self.report)
@@ -528,10 +530,12 @@ impl Cmd for JudgeBatchCmd {
     mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
     mut copy_out_senders: HashMap<String, watch::Sender<String>>,
   ) -> Result<(), ExecuteError> {
-    let lang = CONFIG
-      .lang
-      .get(&self.lang)
-      .map_or(Err(ExecuteError::InvalidLang(self.lang.clone())), |x| Ok(x))?;
+    let lang = etc::LangCfg::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+        lang: self.lang.clone(),
+      })),
+      |x| Ok(x),
+    )?;
     let exec = {
       let mut rx = copy_in_receivers.remove(&self.exec).unwrap();
       rx.changed().await.unwrap();
@@ -560,7 +564,7 @@ impl Cmd for JudgeBatchCmd {
 
     let (res, copy_out_id) = sandbox
       .judge_batch(
-        lang,
+        &lang,
         self.args.clone(),
         exec,
         inf,
@@ -570,7 +574,7 @@ impl Cmd for JudgeBatchCmd {
       )
       .await;
 
-    if res.status != result::Status::Accepted {
+    if res.status != result::ExecuteStatus::Accepted {
       return Err(ExecuteError::Runtime(res.into()));
     }
 

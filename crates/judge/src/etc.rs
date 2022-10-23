@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, time};
+use std::{
+  borrow::Borrow,
+  collections::HashSet,
+  fmt::Display,
+  hash::{Hash, Hasher},
+  str::FromStr,
+  time,
+};
+use thiserror::Error;
 
 use crate::ARGS;
 
@@ -17,7 +25,7 @@ pub struct Cfg {
   /// WARNING: Be sure to set a token secret in a production environment.
   pub secret: Option<String>,
 
-  pub lang: HashMap<String, LangCfg>,
+  pub lang: HashSet<LangCfg>,
 
   pub sandbox: SandboxCfg,
 }
@@ -28,49 +36,45 @@ impl Default for Cfg {
     return Self {
       host: ":8080".to_string(),
       secret: None,
-      lang: HashMap::from([
-        (
-          "c".to_string(),
-          LangCfg {
-            compile_cmd: [
-              "/usr/bin/gcc",
-              "foo.c",
-              "-o",
-              "foo",
-              "-O2",
-              "-w",
-              "-fmax-errors=3",
-              "-DONLINE_JUDGE",
-            ]
-            .iter()
-            .map(|&s| s.into())
-            .collect(),
-            run_cmd: vec!["foo".to_string()],
-            source: "foo.c".to_string(),
-            exec: "foo".to_string(),
-          },
-        ),
-        (
-          "cpp".to_string(),
-          LangCfg {
-            compile_cmd: [
-              "/usr/bin/g++",
-              "foo.cpp",
-              "-o",
-              "foo",
-              "-O2",
-              "-w",
-              "-fmax-errors=3",
-              "-DONLINE_JUDGE",
-            ]
-            .iter()
-            .map(|&s| s.into())
-            .collect(),
-            run_cmd: vec!["foo".to_string()],
-            source: "foo.cpp".to_string(),
-            exec: "foo".to_string(),
-          },
-        ),
+      lang: HashSet::from([
+        LangCfg {
+          name: "c".to_string(),
+          compile_cmd: [
+            "/usr/bin/gcc",
+            "foo.c",
+            "-o",
+            "foo",
+            "-O2",
+            "-w",
+            "-fmax-errors=3",
+            "-DONLINE_JUDGE",
+          ]
+          .iter()
+          .map(|&s| s.into())
+          .collect(),
+          run_cmd: vec!["foo".to_string()],
+          source: "foo.c".to_string(),
+          exec: "foo".to_string(),
+        },
+        LangCfg {
+          name: "cpp".to_string(),
+          compile_cmd: [
+            "/usr/bin/g++",
+            "foo.cpp",
+            "-o",
+            "foo",
+            "-O2",
+            "-w",
+            "-fmax-errors=3",
+            "-DONLINE_JUDGE",
+          ]
+          .iter()
+          .map(|&s| s.into())
+          .collect(),
+          run_cmd: vec!["foo".to_string()],
+          source: "foo.cpp".to_string(),
+          exec: "foo".to_string(),
+        },
       ]),
       sandbox: SandboxCfg {
         env: vec![
@@ -91,8 +95,10 @@ impl Default for Cfg {
 }
 
 /// Programming language config.
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Eq)]
 pub struct LangCfg {
+  name: String,
+
   pub compile_cmd: Vec<String>,
 
   pub run_cmd: Vec<String>,
@@ -102,6 +108,56 @@ pub struct LangCfg {
 
   /// Name of executable file
   pub exec: String,
+}
+
+impl LangCfg {
+  pub fn name(&self) -> &str {
+    return &self.name;
+  }
+}
+
+impl PartialEq for LangCfg {
+  fn eq(&self, other: &LangCfg) -> bool {
+    self.name == other.name
+  }
+}
+
+impl Hash for LangCfg {
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.name.hash(state);
+  }
+}
+
+impl Borrow<str> for LangCfg {
+  fn borrow(&self) -> &str {
+    &self.name
+  }
+}
+
+#[derive(Error, Debug, Clone)]
+#[error("invalid lang: {lang}")]
+/// Error when parsing a language name which not in global settings.
+pub struct InvalidLangError {
+  pub lang: String,
+}
+
+impl FromStr for LangCfg {
+  type Err = InvalidLangError;
+
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match CONFIG.lang.get(s) {
+      Some(x) => Ok(x.clone()),
+      None => Err(Self::Err {
+        lang: s.to_string(),
+      }),
+    }
+  }
+}
+
+impl Display for LangCfg {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{}", &self.name)
+  }
 }
 
 /// Sandbox config.

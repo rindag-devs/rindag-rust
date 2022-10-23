@@ -1,6 +1,7 @@
 mod checker;
 mod compile;
 mod generator;
+mod problem;
 mod sandbox;
 mod validator;
 mod workflow;

@@ -1,8 +1,7 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{
-  builtin,
-  etc::CONFIG,
+  builtin, etc,
   sandbox::{self, proto},
   test,
 };
@@ -15,7 +14,7 @@ async fn test_simple() {
 
   let exec_id = sandbox
     .compile(
-      &CONFIG.lang["cpp"],
+      &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
       proto::File::Memory(
         "
@@ -46,7 +45,7 @@ async fn test_simple() {
 
   let file_id = sandbox
     .generate(
-      &CONFIG.lang["cpp"],
+      &etc::LangCfg::from_str("cpp").unwrap(),
       vec!["-n".to_string(), "100".to_string()],
       proto::File::Cached(exec_id.into()),
       HashMap::new(),

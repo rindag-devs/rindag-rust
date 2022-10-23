@@ -1,10 +1,10 @@
-use std::{sync::Arc, time};
+use std::time;
 
 use serde::{Deserialize, Serialize};
-use strum::IntoEnumIterator;
+use strum::{Display, IntoEnumIterator};
 use thiserror::Error;
 
-use crate::sandbox::proto;
+use crate::{checker, sandbox::proto};
 
 /// Limit the message to a maximum of 'LIMIT' characters.
 pub fn limit_message(s: &str) -> String {
@@ -53,28 +53,22 @@ pub enum Signal {
   BadSystemCall = 31,
 }
 
-/// Judge result status on a single test case.
-#[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone)]
+/// Judge result status for a program.
+/// This enum is only used to represent the result after executing the program,
+/// and does not represent the result after the checker checks the correctness of the answer.
+#[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone, Display)]
 #[strum(serialize_all = "snake_case")]
-pub enum Status {
-  Waiting,
-  Judging,
+pub enum ExecuteStatus {
   Accepted,
-  WrongAnswer,
-  PartiallyCorrect,
   TimeLimitExceeded,
   MemoryLimitExceeded,
   OutputLimitExceeded,
-  CompileError, // Only be used in `Record`.
   FileError,
-  PresentationError,
   RuntimeError,
   SystemError,
-  Canceled,
-  Skipped,
 }
 
-impl From<proto::StatusType> for Status {
+impl From<proto::StatusType> for ExecuteStatus {
   fn from(s: proto::StatusType) -> Self {
     return match s {
       proto::StatusType::Invalid => Self::SystemError,
@@ -91,11 +85,11 @@ impl From<proto::StatusType> for Status {
   }
 }
 
-/// Result of a single task.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JudgeResult {
+/// Result of a program running on a single task.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ExecuteResult {
   /// Judge status.
-  pub status: Status,
+  pub status: ExecuteStatus,
 
   /// Code run time.
   pub time: time::Duration,
@@ -110,9 +104,9 @@ pub struct JudgeResult {
   pub exit_code: i32,
 }
 
-impl From<proto::Result> for JudgeResult {
+impl From<proto::Result> for ExecuteResult {
   fn from(res: proto::Result) -> Self {
-    return Self {
+    Self {
       status: res.status().into(),
       time: time::Duration::from_nanos(res.time),
       memory: res.memory,
@@ -130,19 +124,31 @@ impl From<proto::Result> for JudgeResult {
         proto::StatusType::InternalError => res.error.clone(),
         _ => limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
       },
-    };
+    }
   }
 }
 
-// Error when task does not executed normally (result != Accepted).
+impl From<tonic::Status> for ExecuteResult {
+  fn from(_: tonic::Status) -> Self {
+    Self {
+      status: ExecuteStatus::SystemError,
+      time: time::Duration::ZERO,
+      memory: 0,
+      stderr: String::new(),
+      exit_code: -1,
+    }
+  }
+}
+
+/// Error when task does not executed normally (result != Accepted).
 #[derive(Debug, Error, Clone)]
 pub enum Error {
   #[error(
-    "task executed failed (status: {status:?}, \
+    "task executed failed (status: {status}, \
     time: {time:?}, memory: {memory} bytes, stderr: {stderr})"
   )]
   Execute {
-    status: Status,
+    status: ExecuteStatus,
     time: time::Duration,
     memory: u64,
     stderr: String,
@@ -150,7 +156,7 @@ pub enum Error {
   },
 
   #[error("sandbox error")]
-  Sandbox(#[from] Arc<tonic::Status>),
+  Sandbox(#[from] tonic::Status),
 }
 
 impl From<proto::Result> for Error {
@@ -165,8 +171,8 @@ impl From<proto::Result> for Error {
   }
 }
 
-impl From<JudgeResult> for Error {
-  fn from(res: JudgeResult) -> Self {
+impl From<ExecuteResult> for Error {
+  fn from(res: ExecuteResult) -> Self {
     return Self::Execute {
       status: res.status,
       stderr: res.stderr,
@@ -174,5 +180,172 @@ impl From<JudgeResult> for Error {
       time: res.time,
       exit_code: res.exit_code,
     };
+  }
+}
+
+/// Judge result status for a program.
+/// This enum is only used to represent the result after executing the program,
+/// and does not represent the result after the checker checks the correctness of the answer.
+#[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum RecordStatus {
+  Waiting,
+  Skipped,
+  Accepted,
+  WrongAnswer,
+  PartiallyCorrect,
+  PresentationError,
+  TimeLimitExceeded,
+  MemoryLimitExceeded,
+  OutputLimitExceeded,
+  FileError,
+  RuntimeError,
+  SystemError,
+}
+
+impl From<ExecuteStatus> for RecordStatus {
+  fn from(s: ExecuteStatus) -> Self {
+    match s {
+      ExecuteStatus::Accepted => Self::Accepted,
+      ExecuteStatus::TimeLimitExceeded => Self::TimeLimitExceeded,
+      ExecuteStatus::MemoryLimitExceeded => Self::MemoryLimitExceeded,
+      ExecuteStatus::OutputLimitExceeded => Self::OutputLimitExceeded,
+      ExecuteStatus::FileError => Self::FileError,
+      ExecuteStatus::RuntimeError => Self::RuntimeError,
+      ExecuteStatus::SystemError => Self::SystemError,
+    }
+  }
+}
+
+impl From<checker::Status> for RecordStatus {
+  fn from(s: checker::Status) -> Self {
+    match s {
+      checker::Status::Accepted => Self::Accepted,
+      checker::Status::WrongAnswer => Self::WrongAnswer,
+      checker::Status::PartiallyCorrect => Self::PartiallyCorrect,
+      checker::Status::PresentationError => Self::PresentationError,
+      checker::Status::SystemError => Self::SystemError,
+    }
+  }
+}
+
+/// A judge record of a solution running a single test.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Record {
+  /// Judge status.
+  pub status: RecordStatus,
+
+  /// Code run time.
+  pub time: time::Duration,
+
+  /// Memory in bytes.
+  pub memory: u64,
+
+  /// A cut prefix of stderr.
+  pub stderr: String,
+
+  /// Exit code.
+  pub exit_code: i32,
+
+  /// Score.
+  pub score: f32,
+
+  /// Checker message.
+  pub checker_message: String,
+}
+
+lazy_static! {
+  pub static ref RECORD_WAITING: Record = Record {
+    status: RecordStatus::Waiting,
+    time: time::Duration::ZERO,
+    memory: 0,
+    stderr: "waiting".to_string(),
+    exit_code: -1,
+    score: 0.,
+    checker_message: String::new(),
+  };
+  pub static ref RECORD_SKIPPED: Record = Record {
+    status: RecordStatus::Skipped,
+    time: time::Duration::ZERO,
+    memory: 0,
+    stderr: "skipped".to_string(),
+    exit_code: -1,
+    score: 0.,
+    checker_message: String::new(),
+  };
+}
+
+impl Record {
+  /// Combine a JudgeResult and a checker::Output into a Record.
+  pub fn new(result: ExecuteResult, checker_output: Option<checker::Output>) -> Self {
+    if checker_output.is_none() {
+      if result.status != ExecuteStatus::Accepted {
+        return Self {
+          status: RecordStatus::SystemError,
+          time: result.time,
+          memory: result.memory,
+          stderr: result.stderr,
+          exit_code: result.exit_code,
+          score: 0.,
+          checker_message: "error: no checker".to_string(),
+        };
+      }
+      return Self {
+        status: result.status.into(),
+        time: result.time,
+        memory: result.memory,
+        stderr: result.stderr,
+        exit_code: result.exit_code,
+        score: 0.,
+        checker_message: String::new(),
+      };
+    }
+    let checker_output = checker_output.unwrap();
+    return Self {
+      status: checker_output.status.into(),
+      time: result.time,
+      memory: result.memory,
+      stderr: result.stderr,
+      exit_code: result.exit_code,
+      score: checker_output.score,
+      checker_message: checker_output.message,
+    };
+  }
+}
+
+/// Judgement result of an entire problem.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum JudgeResult {
+  Ok {
+    score: f32,
+    results: Vec<Vec<Record>>,
+  },
+  CompileError {
+    message: String,
+  },
+  SystemError {
+    message: String,
+  },
+}
+
+impl From<tonic::Status> for JudgeResult {
+  fn from(err: tonic::Status) -> Self {
+    Self::SystemError {
+      message: err.to_string(),
+    }
+  }
+}
+
+impl JudgeResult {
+  pub fn from_compile_error(err: Error) -> Self {
+    if let Error::Sandbox(err) = err {
+      return Self::SystemError {
+        message: err.to_string(),
+      };
+    }
+    Self::CompileError {
+      message: err.to_string(),
+    }
   }
 }

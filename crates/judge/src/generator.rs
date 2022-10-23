@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{
   etc, result,
@@ -44,7 +44,7 @@ impl sandbox::Client {
           Err(res.results[0].clone().into())
         }
       },
-      Err(e) => Err(result::Error::Sandbox(Arc::new(e))),
+      Err(e) => Err(result::Error::Sandbox(e)),
     };
   }
 }

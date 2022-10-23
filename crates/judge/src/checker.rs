@@ -1,6 +1,8 @@
 use std::{collections::HashMap, str::FromStr, time};
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
+use strum::Display;
 use thiserror::Error;
 
 use crate::{
@@ -8,11 +10,21 @@ use crate::{
   sandbox::{self, proto},
 };
 
+#[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum Status {
+  Accepted,
+  WrongAnswer,
+  PartiallyCorrect,
+  PresentationError,
+  SystemError,
+}
+
 /// Parsed testlib checker output.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Output {
   /// Testlib parsed status.
-  pub status: result::Status,
+  pub status: Status,
 
   /// Length limited output message.
   pub message: String,
@@ -48,76 +60,48 @@ impl Output {
         Regex::new(r"(?s)\A(?:partially correct|points) \(?([0-9]*\.?[0-9]*)\)?\s*(.*?)\s*\z")
           .unwrap();
       static ref CUSTOM_PAT: Regex =
-        Regex::new(r"(?m)^[ \t]*(status|score)\((\w+)\)[ \t]*(.*?)\s*$").unwrap();
+        Regex::new(r"(?m)^[ \t]*(status|score)\(([\w\.]+)\)[ \t]*(.*?)\s*$").unwrap();
     }
 
-    let mut ret = Self {
-      status: result::Status::SystemError,
-      score: 0.,
-      message: result::limit_message(output),
-    };
+    let mut ret = (Status::SystemError, 0.);
 
-    if let Some(cap) = AC_PAT.captures(output) {
-      ret = Self {
-        status: result::Status::Accepted,
-        score: 1.,
-        message: result::limit_message(&format!("ac {}", &cap[1])),
-      };
-    } else if let Some(cap) = WA_PAT.captures(output) {
-      ret = Self {
-        status: result::Status::WrongAnswer,
-        score: 0.,
-        message: result::limit_message(&format!("wa {}", &cap[1])),
-      };
-    } else if let Some(cap) = FAIL_PAT.captures(output) {
-      ret = Self {
-        status: result::Status::SystemError,
-        score: 0.,
-        message: result::limit_message(&format!("fail {}", &cap[1])),
-      };
-    } else if let Some(cap) = PE_PAT.captures(output) {
-      ret = Self {
-        status: result::Status::PresentationError,
-        score: 0.,
-        message: result::limit_message(&format!("pe {}", &cap[1])),
-      };
+    if AC_PAT.is_match(output) {
+      ret = (Status::Accepted, 1.);
+    } else if WA_PAT.is_match(output) {
+      ret = (Status::WrongAnswer, 0.);
+    } else if FAIL_PAT.is_match(output) {
+      ret = (Status::SystemError, 0.);
+    } else if PE_PAT.is_match(output) {
+      ret = (Status::PresentationError, 0.);
     } else if let Some(cap) = PC_PAT.captures(output) {
       if let Ok(score) = cap[1].parse::<f32>() {
         if score >= 1. {
-          ret = Self {
-            status: result::Status::Accepted,
-            score: 1.,
-            message: result::limit_message(&format!("ac {}", &cap[2])),
-          };
+          ret = (Status::Accepted, 1.);
         } else if score <= 0. {
-          ret = Self {
-            status: result::Status::WrongAnswer,
-            score: 0.,
-            message: result::limit_message(&format!("wa {}", &cap[2])),
-          };
+          ret = (Status::WrongAnswer, 0.);
         } else {
-          ret = Self {
-            status: result::Status::PartiallyCorrect,
-            score,
-            message: result::limit_message(&format!("pc {}", &cap[2])),
-          };
+          ret = (Status::PartiallyCorrect, score);
         }
       }
     }
 
     for cap in CUSTOM_PAT.captures_iter(output) {
       if &cap[1] == "status" {
-        if let Ok(stat) = result::Status::from_str(&cap[2]) {
-          ret.status = stat;
+        if let Ok(stat) = Status::from_str(&cap[2]) {
+          ret.0 = stat;
         }
       } else if &cap[1] == "score" {
         if let Ok(stat) = cap[2].parse::<f32>() {
-          ret.score = stat.clamp(0., 1.);
+          ret.1 = stat.clamp(0., 1.);
         }
       }
     }
 
-    return ret;
+    return Self {
+      status: ret.0,
+      score: ret.1,
+      message: result::limit_message(output),
+    };
   }
 }
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{
   etc, result,
@@ -38,7 +38,7 @@ impl sandbox::Client {
     let res = self.exec(vec![cmd], vec![]).await;
 
     if let Err(e) = res {
-      return Err(result::Error::Sandbox(Arc::new(e)));
+      return Err(result::Error::Sandbox(e));
     }
 
     let res = &res.unwrap().results[0];

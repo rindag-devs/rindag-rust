@@ -23,7 +23,7 @@ impl sandbox::Client {
     mut copy_in: HashMap<String, proto::File>,
     time_limit: time::Duration,
     memory_limit: u64,
-  ) -> (result::JudgeResult, Option<String>) {
+  ) -> (result::ExecuteResult, Option<String>) {
     let c = &CONFIG.sandbox;
 
     copy_in.insert(lang.exec.clone(), exec);
@@ -54,7 +54,7 @@ impl sandbox::Client {
     return match self.exec(vec![cmd], vec![]).await {
       // Return file id of stdout if the command executed successful.
       Ok(res) => (
-        result::JudgeResult::from(res.results[0].clone()),
+        result::ExecuteResult::from(res.results[0].clone()),
         match res.results[0].status() {
           proto::StatusType::Accepted => Some(res.results[0].file_ids["stdout"].clone()),
           _ => {
@@ -67,8 +67,8 @@ impl sandbox::Client {
       ),
       // A sandbox error encountered.
       Err(e) => (
-        result::JudgeResult {
-          status: result::Status::SystemError,
+        result::ExecuteResult {
+          status: result::ExecuteStatus::SystemError,
           time: time::Duration::ZERO,
           memory: 0,
           stderr: format!("Sandbox error: {}", e),

@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{
-  builtin,
+  builtin, etc,
   sandbox::{self, proto},
-  test, validator, CONFIG,
+  test, validator,
 };
 
 #[tokio::test]
@@ -14,7 +14,7 @@ async fn test_val_a_plus_b() {
 
   let exec_id = sandbox
     .compile(
-      &CONFIG.lang["cpp"],
+      &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
       proto::File::Memory(
         "
@@ -54,7 +54,7 @@ async fn test_val_a_plus_b() {
   assert_eq!(
     sandbox
       .validate(
-        &CONFIG.lang["cpp"],
+        &etc::LangCfg::from_str("cpp").unwrap(),
         vec!["--group".to_string(), "even_a_and_b".to_string()],
         proto::File::Cached(exec_id.clone().into()),
         proto::File::Memory("0 -10\n".into()),
@@ -87,7 +87,7 @@ async fn test_val_a_plus_b() {
   assert_eq!(
     sandbox
       .validate(
-        &CONFIG.lang["cpp"],
+        &etc::LangCfg::from_str("cpp").unwrap(),
         vec![],
         proto::File::Cached(exec_id.clone().into()),
         proto::File::Memory("-100 100\n".into()),
@@ -119,7 +119,7 @@ async fn test_val_a_plus_b() {
 
   assert!(sandbox
     .validate(
-      &CONFIG.lang["cpp"],
+      &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
       proto::File::Cached(exec_id.clone().into()),
       proto::File::Memory("-100 101\n".into()),
@@ -130,7 +130,7 @@ async fn test_val_a_plus_b() {
 
   assert!(sandbox
     .validate(
-      &CONFIG.lang["cpp"],
+      &etc::LangCfg::from_str("cpp").unwrap(),
       vec!["--group".to_string(), "even_a_and_b".to_string()],
       proto::File::Cached(exec_id.clone().into()),
       proto::File::Memory("1 2\n".into()),

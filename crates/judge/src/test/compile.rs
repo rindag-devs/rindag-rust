@@ -1,15 +1,15 @@
-use std::{collections::HashMap, time};
+use std::{collections::HashMap, str::FromStr, time};
 
 use crate::{
-  result,
+  etc, result,
   sandbox::{self, proto},
-  test, CONFIG,
+  test,
 };
 
 async fn compile_test_c_prog(sandbox: &sandbox::Client) -> Result<String, result::Error> {
   sandbox
     .compile(
-      &CONFIG.lang["c"],
+      &etc::LangCfg::from_str("c").unwrap(),
       vec![],
       proto::File::Memory(
         "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}".into(),
@@ -33,7 +33,7 @@ async fn test_ce() {
   let sandbox = sandbox::Client::from_global_config().await;
   let res = sandbox
     .compile(
-      &CONFIG.lang["c"],
+      &etc::LangCfg::from_str("c").unwrap(),
       vec![],
       proto::File::Memory("ERROR!".into()),
       HashMap::new(),
@@ -52,7 +52,7 @@ async fn test_ok() {
 
   let res = sandbox
     .judge_batch(
-      &CONFIG.lang["c"],
+      &etc::LangCfg::from_str("c").unwrap(),
       [].into(),
       proto::File::Cached(exec_id.into()),
       proto::File::Memory("998244353".into()),
@@ -62,12 +62,12 @@ async fn test_ok() {
     )
     .await;
 
-  assert_eq!(res.0.status, result::Status::Accepted);
+  assert_eq!(res.0.status, result::ExecuteStatus::Accepted);
 
   let output = sandbox.file_get(res.1.unwrap()).await.unwrap();
 
   assert_eq!(
     output.content,
-    "hello\nfunc: 998244343\n".as_bytes().to_vec()
+    "hello\nfunc: 998244353\n".as_bytes().to_vec()
   );
 }

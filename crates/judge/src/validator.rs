@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -117,7 +117,7 @@ impl sandbox::Client {
         ))),
         _ => Err(res.results[0].clone().into()),
       },
-      Err(e) => Err(result::Error::Sandbox(Arc::new(e))),
+      Err(e) => Err(result::Error::Sandbox(e)),
     };
   }
 }

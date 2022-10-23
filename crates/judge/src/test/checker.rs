@@ -1,11 +1,10 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{
   builtin,
-  checker::Output,
-  result,
+  checker::{self, Output},
+  etc,
   sandbox::{self, proto},
-  CONFIG,
 };
 
 #[test]
@@ -13,45 +12,45 @@ fn test_parse_output() {
   assert_eq!(
     Output::parse("ok you win\n3 steps."),
     Output {
-      status: result::Status::Accepted,
+      status: checker::Status::Accepted,
       score: 1.0f32,
-      message: "ac you win\n3 steps.".to_string()
+      message: "ok you win\n3 steps.".to_string()
     }
   );
 
   assert_eq!(
     Output::parse("wrong answer you lose\n12 steps."),
     Output {
-      status: result::Status::WrongAnswer,
+      status: checker::Status::WrongAnswer,
       score: 0.0f32,
-      message: "wa you lose\n12 steps.".to_string()
+      message: "wrong answer you lose\n12 steps.".to_string()
     }
   );
 
   assert_eq!(
     Output::parse("points 0.12 you used 12 / 100 moves"),
     Output {
-      status: result::Status::PartiallyCorrect,
+      status: checker::Status::PartiallyCorrect,
       score: 0.12f32,
-      message: "pc you used 12 / 100 moves".to_string()
+      message: "points 0.12 you used 12 / 100 moves".to_string()
     }
   );
 
   assert_eq!(
     Output::parse("wrong output format \t \textra spaces\n\t\t"),
     Output {
-      status: result::Status::PresentationError,
+      status: checker::Status::PresentationError,
       score: 0.0f32,
-      message: "pe extra spaces".to_string()
+      message: "wrong output format \t \textra spaces\n\t\t".to_string()
     }
   );
 
   assert_eq!(
-    Output::parse("status(time_limit_exceeded)\nscore(1)"),
+    Output::parse("status(accepted)\nscore(0.1)"),
     Output {
-      status: result::Status::TimeLimitExceeded,
-      score: 1.0f32,
-      message: "status(time_limit_exceeded)\nscore(1)".to_string()
+      status: checker::Status::Accepted,
+      score: 0.1f32,
+      message: "status(accepted)\nscore(0.1)".to_string()
     }
   );
 }
@@ -69,7 +68,7 @@ async fn test_builtin_checker() {
 
   let exec_id = sandbox
     .compile(
-      &CONFIG.lang["cpp"],
+      &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
       checker,
       [(
@@ -89,7 +88,7 @@ async fn test_builtin_checker() {
 
   let res = sandbox
     .check(
-      &CONFIG.lang["cpp"],
+      &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
       proto::File::Cached(exec_id.into()),
       proto::File::Memory("hello\n".into()),
@@ -100,5 +99,5 @@ async fn test_builtin_checker() {
     .await
     .unwrap();
 
-  assert_eq!(res.status, result::Status::Accepted);
+  assert_eq!(res.status, checker::Status::Accepted);
 }

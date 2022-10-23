@@ -1,6 +1,6 @@
-use std::{sync::Arc, time};
+use std::{str::FromStr, sync::Arc, time};
 
-use crate::{file, sandbox, test, validator, workflow};
+use crate::{builtin, file, sandbox, test, validator, workflow};
 
 #[tokio::test]
 async fn test_generate_a_plus_b() {
@@ -42,19 +42,16 @@ async fn test_generate_a_plus_b() {
     copy_in: [
       (
         "generator.cpp".to_string(),
-        file::File::Memory(gen_code.as_bytes().to_vec()),
+        gen_code.as_bytes().to_vec().into(),
       ),
-      (
-        "std.cpp".to_string(),
-        file::File::Memory(std_code.as_bytes().to_vec()),
-      ),
+      ("std.cpp".to_string(), std_code.as_bytes().to_vec().into()),
       (
         "validator.cpp".to_string(),
-        file::File::Memory(val_code.as_bytes().to_vec()),
+        val_code.as_bytes().to_vec().into(),
       ),
       (
         "testlib.h".to_string(),
-        file::File::Builtin("testlib:testlib.h".parse().unwrap()),
+        builtin::File::from_str("testlib:testlib.h").unwrap().into(),
       ),
     ]
     .into(),
@@ -113,7 +110,7 @@ async fn test_generate_a_plus_b() {
   };
 
   let sandbox = Arc::new(sandbox::Client::from_global_config().await);
-  let res = sandbox.exec_workflow(&w).await.unwrap();
+  let res = w.exec(sandbox.clone()).await.unwrap();
 
   assert_eq!(
     sandbox
@@ -201,7 +198,7 @@ async fn test_duplicate_file() {
   };
 
   let sandbox = Arc::new(sandbox::Client::from_global_config().await);
-  let err = sandbox.exec_workflow(&w).await.unwrap_err();
+  let err = w.exec(sandbox.clone()).await.unwrap_err();
   if let workflow::Error::Parse(workflow::ParseError::DuplicateFile(err)) = err {
     assert_eq!(
       err,

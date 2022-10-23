@@ -9,6 +9,7 @@ pub mod etc;
 pub mod file;
 pub mod generator;
 pub mod judge;
+pub mod problem;
 pub mod result;
 pub mod sandbox;
 pub mod validator;
