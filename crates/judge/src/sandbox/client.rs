@@ -1,13 +1,16 @@
 use std::{collections::HashMap, sync::Arc};
 
+use async_once::AsyncOnce;
+use thiserror::Error;
 use tokio::sync::Semaphore;
 
-use crate::{sandbox::proto, CONFIG};
+use crate::{etc, sandbox::proto, CONFIG};
 
 /// go-judge client
+#[derive(Clone)]
 pub struct Client {
-  /// The gRpc client.
-  client: proto::ExecutorClient<tonic::transport::Channel>,
+  /// The gRPC client.
+  client: proto::executor_client::ExecutorClient<tonic::transport::Channel>,
 
   /// A semaphore to limit for max job count.
   semaphore: Arc<Semaphore>,
@@ -19,20 +22,13 @@ impl Client {
   /// # Panics
   ///
   /// Panics if the endpoint connect error.
-  pub async fn connect(endpoint: tonic::transport::Endpoint, max_job: usize) -> Self {
+  async fn connect(conf: &etc::SandboxCfg) -> Self {
     return Self {
-      client: proto::ExecutorClient::connect(endpoint).await.unwrap(),
-      semaphore: Arc::new(Semaphore::new(max_job)),
+      client: proto::executor_client::ExecutorClient::connect(conf.host.clone())
+        .await
+        .unwrap(),
+      semaphore: Arc::new(Semaphore::new(conf.max_job)),
     };
-  }
-
-  pub async fn from_global_config() -> Self {
-    let conf = &CONFIG.sandbox;
-    return Self::connect(
-      tonic::transport::Channel::from_static(&conf.host),
-      conf.max_job,
-    )
-    .await;
   }
 
   /// Get a file of sandbox server. and return it's content.
@@ -40,56 +36,68 @@ impl Client {
   /// # Errors
   ///
   /// This function will return an error if the file is not found or the connect is broken.
-  pub async fn file_get(&self, file_id: String) -> Result<proto::FileContent, tonic::Status> {
+  pub(super) async fn file_get(&self, file_id: &str) -> Result<Vec<u8>, FileGetError> {
     match self
       .client
       .clone()
-      .file_get(proto::FileId { file_id })
+      .file_get(proto::FileId {
+        file_id: file_id.to_string(),
+      })
       .await
     {
-      Ok(res) => Ok(res.get_ref().clone()),
-      Err(e) => Err(e),
+      Ok(f) => Ok(f.get_ref().content.clone()),
+      Err(err) => match err.code() {
+        tonic::Code::NotFound => Err(FileGetError {
+          id: file_id.to_string(),
+        }),
+        _ => panic!("file get error: {}", err),
+      },
     }
   }
 
   /// Prepare a file in the sandbox, returns file id (can be referenced in `run` parameter).
-  pub async fn file_add(&self, content: Vec<u8>) -> Result<String, tonic::Status> {
-    match self
+  pub async fn file_add(&self, content: &[u8]) -> String {
+    self
       .client
       .clone()
       .file_add(proto::FileContent {
-        content,
+        content: content.to_vec(),
         ..Default::default()
       })
       .await
-    {
-      Ok(res) => Ok(res.get_ref().file_id.clone()),
-      Err(e) => Err(e),
-    }
+      .unwrap()
+      .get_ref()
+      .file_id
+      .clone()
   }
 
   /// Delete a file of sandbox server.
-  pub async fn file_delete(&self, file_id: String) -> Result<(), tonic::Status> {
-    match self
+  pub(super) async fn file_delete(&self, file_id: &str) {
+    self
       .client
       .clone()
-      .file_delete(proto::FileId { file_id })
+      .file_delete(proto::FileId {
+        file_id: file_id.to_string(),
+      })
       .await
-    {
-      Ok(_) => Ok(()),
-      Err(e) => Err(e),
-    }
+      .unwrap();
   }
 
   /// List all files of sandbox server.
   ///
   /// - Key of hashmap is file id.
   /// - Value of hashmap is file name.
-  pub async fn file_list(&self) -> Result<HashMap<String, String>, tonic::Status> {
-    match self.client.clone().file_list(()).await {
-      Ok(res) => Ok(res.get_ref().file_ids.clone()),
-      Err(e) => Err(e),
-    }
+  #[allow(dead_code)]
+  pub async fn file_list(&self) -> HashMap<String, String> {
+    self
+      .client
+      .clone()
+      .file_list(())
+      .await
+      .unwrap()
+      .get_ref()
+      .file_ids
+      .clone()
   }
 
   /// Execute some command (then not wait).
@@ -97,29 +105,24 @@ impl Client {
   /// All the command will be executed parallelly.
   ///
   /// Returns the uuid of request and an oneshot result receiver.
-  pub async fn exec(
-    &self,
-    cmd: Vec<proto::Cmd>,
-    pipe_mapping: Vec<proto::PipeMap>,
-  ) -> Result<proto::Response, tonic::Status> {
-    let req = proto::Request {
-      cmd: cmd.into_iter().map(|c| c.into()).collect(),
-      pipe_mapping,
-      ..Default::default()
-    };
-
+  pub(super) async fn exec(&self, req: proto::Request) -> proto::Response {
     let client = self.client.clone();
     let permit = self.semaphore.clone().acquire_owned().await.unwrap();
 
-    let res = match client.clone().exec(req).await {
-      Ok(res) => Ok(res.get_ref().clone()),
-      Err(e) => {
-        log::warn!("sandbox grpc error: {}", e.message());
-        Err(e)
-      }
-    };
+    let res = client.clone().exec(req).await.unwrap();
 
     drop(permit);
-    return res;
+    res.get_ref().clone()
   }
+}
+
+#[derive(Debug, Error)]
+#[error("file get error: {id}")]
+pub struct FileGetError {
+  pub id: String,
+}
+
+lazy_static! {
+  pub(super) static ref CLIENT: AsyncOnce<Client> =
+    AsyncOnce::new(async { Client::connect(&CONFIG.sandbox).await });
 }

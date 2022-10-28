@@ -10,7 +10,6 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bson = "2"
 config = "0.13"
 serde = "1"
 lazy_static = "1"
@@ -27,12 +26,13 @@ async_once = "0.2"
 tonic = "0.8"
 prost = "0.11"
 prost-types = "0.11"
-rust-embed = { version = "6", features = ["debug-embed"] }
+rust-embed = { version = "6", features = ["debug-embed", "include-exclude"] }
 serde_with = "2"
 serde_bytes = "0.11"
 async-trait = "0.1"
 typetag = "0.2"
 futures = "0.3"
+rmp-serde = "1"
 
 [dependencies.uuid]
 version = "1"

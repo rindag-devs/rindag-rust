@@ -11,12 +11,11 @@ pub enum File {
 }
 
 impl File {
-  pub fn get_content(&self) -> Vec<u8> {
-    let content = match self {
-      Self::Memory(m) => m.to_vec(),
-      Self::Builtin(b) => b.content.to_vec(),
-    };
-    return content;
+  pub fn as_bytes(&self) -> &[u8] {
+    match self {
+      Self::Memory(m) => &m,
+      Self::Builtin(b) => &b.as_bytes(),
+    }
   }
 }
 

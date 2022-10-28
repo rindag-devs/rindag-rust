@@ -1,14 +1,15 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use crate::{
   builtin,
   checker::{self, Output},
-  etc,
-  sandbox::{self, proto},
+  compile, etc, sandbox,
 };
 
 #[test]
 fn test_parse_output() {
+  super::init();
+
   assert_eq!(
     Output::parse("ok you win\n3 steps."),
     Output {
@@ -55,30 +56,33 @@ fn test_parse_output() {
   );
 }
 
-#[tokio::test]
-async fn test_builtin_checker() {
-  let sandbox = sandbox::Client::from_global_config().await;
-  let checker = proto::File::Memory(
-    builtin::Checker::get("ncmp.cpp")
-      .unwrap()
-      .data
-      .to_vec()
-      .into(),
-  );
+#[test]
+fn test_builtin_checker() {
+  super::test_rt().block_on(async {
+    super::init();
 
-  let exec_id = sandbox
-    .compile(
+    let checker = Arc::new(
+      sandbox::FileHandle::upload(
+        &builtin::File::from_str("checker:ncmp.cpp")
+          .unwrap()
+          .as_bytes(),
+      )
+      .await,
+    );
+
+    let exec_file = compile::compile(
       &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
       checker,
       [(
         "testlib.h".to_string(),
-        proto::File::Memory(
-          builtin::Testlib::get("testlib.h")
-            .unwrap()
-            .data
-            .to_vec()
-            .into(),
+        Arc::new(
+          sandbox::FileHandle::upload(
+            &builtin::File::from_str("testlib:testlib.h")
+              .unwrap()
+              .as_bytes(),
+          )
+          .await,
         ),
       )]
       .into(),
@@ -86,18 +90,18 @@ async fn test_builtin_checker() {
     .await
     .unwrap();
 
-  let res = sandbox
-    .check(
+    let res = checker::check(
       &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
-      proto::File::Cached(exec_id.into()),
-      proto::File::Memory("hello\n".into()),
-      proto::File::Memory("9 9   8\n2\n  4 4\t3 5\n3".into()),
-      proto::File::Memory("9 9 8 2 4 4 3 5 3\n".into()),
+      exec_file,
+      Arc::new(sandbox::FileHandle::upload("hello\n".as_bytes()).await),
+      Arc::new(sandbox::FileHandle::upload("9 9   8\n2\n  4 4\t3 5\n3".as_bytes()).await),
+      Arc::new(sandbox::FileHandle::upload("9 9 8 2 4 4 3 5 3\n".as_bytes()).await),
       HashMap::new(),
     )
     .await
     .unwrap();
 
-  assert_eq!(res.status, checker::Status::Accepted);
+    assert_eq!(res.status, checker::Status::Accepted);
+  });
 }

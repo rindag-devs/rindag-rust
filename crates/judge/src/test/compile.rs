@@ -1,73 +1,69 @@
-use std::{collections::HashMap, str::FromStr, time};
+use std::{collections::HashMap, str::FromStr, sync::Arc, time};
 
-use crate::{
-  etc, result,
-  sandbox::{self, proto},
-  test,
-};
+use crate::{compile, etc, judge, sandbox};
 
-async fn compile_test_c_prog(sandbox: &sandbox::Client) -> Result<String, result::Error> {
-  sandbox
-    .compile(
+#[test]
+fn test_ce() {
+  super::test_rt().block_on(async {
+    super::init();
+
+    let res = compile::compile(
       &etc::LangCfg::from_str("c").unwrap(),
       vec![],
-      proto::File::Memory(
-        "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}".into(),
+      Arc::new(sandbox::FileHandle::upload("ERROR!".as_bytes()).await),
+      HashMap::new(),
+    )
+    .await;
+
+    assert!(res.is_err());
+  });
+}
+
+#[test]
+fn test_ok() {
+  super::test_rt().block_on(async {
+    super::init();
+
+    let exec_file = compile::compile(
+      &etc::LangCfg::from_str("c").unwrap(),
+      vec![],
+      Arc::new(
+        sandbox::FileHandle::upload(
+          "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}".as_bytes(),
+        )
+        .await,
       ),
       [(
         "my_head.c".to_string(),
-        proto::File::Memory(
-          "#include<stdio.h>\nvoid func(){int x;scanf(\"%d\",&x);printf(\"func: %d\\n\",x);}"
-            .into(),
+        Arc::new(
+          sandbox::FileHandle::upload(
+            "#include<stdio.h>\nvoid func(){int x;scanf(\"%d\",&x);printf(\"func: %d\\n\",x);}"
+              .as_bytes(),
+          )
+          .await,
         ),
       )]
       .into(),
     )
     .await
-}
+    .unwrap();
 
-#[tokio::test]
-async fn test_ce() {
-  test::init();
-
-  let sandbox = sandbox::Client::from_global_config().await;
-  let res = sandbox
-    .compile(
-      &etc::LangCfg::from_str("c").unwrap(),
-      vec![],
-      proto::File::Memory("ERROR!".into()),
-      HashMap::new(),
-    )
-    .await;
-
-  assert!(res.is_err());
-}
-
-#[tokio::test]
-async fn test_ok() {
-  test::init();
-
-  let sandbox = sandbox::Client::from_global_config().await;
-  let exec_id = compile_test_c_prog(&sandbox).await.unwrap();
-
-  let res = sandbox
-    .judge_batch(
+    let res = judge::judge_batch(
       &etc::LangCfg::from_str("c").unwrap(),
       [].into(),
-      proto::File::Cached(exec_id.into()),
-      proto::File::Memory("998244353".into()),
-      HashMap::new(),
+      exec_file.clone(),
+      Arc::new(sandbox::FileHandle::upload("998244353".as_bytes()).await),
+      [].into(),
       time::Duration::from_secs(1),
       64 * 1024 * 1024,
     )
     .await;
 
-  assert_eq!(res.0.status, result::ExecuteStatus::Accepted);
+    assert_eq!(res.0.status, sandbox::Status::Accepted);
 
-  let output = sandbox.file_get(res.1.unwrap()).await.unwrap();
-
-  assert_eq!(
-    output.content,
-    "hello\nfunc: 998244353\n".as_bytes().to_vec()
-  );
+    assert_eq!(
+      res.1.unwrap().to_vec().await.unwrap(),
+      "hello\nfunc: 998244353\n".as_bytes().to_vec()
+    );
+  });
 }

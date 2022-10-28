@@ -17,10 +17,7 @@ use serde_with::{serde_as, DurationNanoSeconds};
 use thiserror::Error;
 use tokio::sync::watch;
 
-use crate::{
-  etc, file, result,
-  sandbox::{self, proto},
-};
+use crate::{compile, etc, file, generator, judge, result, sandbox, validator};
 
 /// A workflow to a set of tasks (like build a problem or do a stress).
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,6 +29,9 @@ pub struct Workflow {
   pub copy_out: HashSet<String>,
 }
 
+type FileSender = watch::Sender<Option<Arc<sandbox::FileHandle>>>;
+type FileReceiver = watch::Receiver<Option<Arc<sandbox::FileHandle>>>;
+
 impl Workflow {
   /// Check file relativity of targets.
   ///
@@ -41,10 +41,10 @@ impl Workflow {
     &self,
   ) -> Result<
     (
-      HashMap<String, watch::Sender<String>>,
-      HashMap<String, watch::Receiver<String>>,
-      Vec<HashMap<String, watch::Sender<String>>>,
-      Vec<HashMap<String, watch::Receiver<String>>>,
+      HashMap<String, FileSender>,
+      HashMap<String, FileReceiver>,
+      Vec<HashMap<String, FileSender>>,
+      Vec<HashMap<String, FileReceiver>>,
     ),
     ParseError,
   > {
@@ -60,7 +60,7 @@ impl Workflow {
     }
 
     for inf in &self.copy_in {
-      let (tx, rx) = watch::channel(String::new());
+      let (tx, rx) = watch::channel(None);
       global_inf_senders.insert(inf.0.to_string(), tx);
       file_receivers.insert(inf.0.to_string(), rx);
     }
@@ -88,7 +88,7 @@ impl Workflow {
             .into(),
           );
         }
-        let (tx, rx) = watch::channel(String::new());
+        let (tx, rx) = watch::channel(None);
         ouf_senders[i].insert(ouf.to_string(), tx);
         file_receivers.insert(ouf.to_string(), rx);
       }
@@ -125,33 +125,26 @@ impl Workflow {
     ));
   }
 
-  pub async fn exec(
-    &self,
-    sandbox: Arc<sandbox::Client>,
-  ) -> Result<HashMap<String, String>, Error> {
+  pub async fn exec(&self) -> Result<HashMap<String, Arc<sandbox::FileHandle>>, Error> {
     let (mut global_inf_senders, mut file_receivers, mut ouf_senders, mut inf_receivers) = self
       .parse()
       .map_or_else(|e| Err(Error::Parse(e)), |g| Ok(g))?;
 
     // Upload files to sandbox.
     for inf in &self.copy_in {
-      let content = inf.1.get_content();
-      let file_id = sandbox
-        .file_add(content)
-        .await
-        .map_or_else(|e| Err(Error::Sandbox(e)), |x| Ok(x))?;
+      let content = inf.1.as_bytes();
+      let file = Arc::new(sandbox::FileHandle::upload(&content).await);
       let sender = global_inf_senders.remove(inf.0).unwrap();
-      _ = sender.send(file_id);
+      _ = sender.send(Some(file));
     }
 
     let coroutines = futures::stream::FuturesUnordered::new();
     for (i, task) in self.tasks.iter().enumerate() {
       let ir = mem::replace(&mut inf_receivers[i], HashMap::new());
       let os = mem::replace(&mut ouf_senders[i], HashMap::new());
-      let sandbox = sandbox.clone();
       let task = task.clone();
       coroutines.push(async move {
-        if let Err(e) = task.exec(sandbox.as_ref(), ir, os).await {
+        if let Err(e) = task.exec(ir, os).await {
           return Err(Error::Execute {
             index: i,
             source: e,
@@ -166,36 +159,11 @@ impl Workflow {
       .then(|f| async move {
         (f.0.to_string(), {
           f.1.changed().await.unwrap();
-          (*f.1.borrow()).clone()
+          let x = (*f.1.borrow()).clone();
+          x.unwrap()
         })
       })
       .collect()
-      .await;
-
-    let mut files_to_clean = HashSet::new();
-
-    for (f, _) in &self.copy_in {
-      if !self.copy_out.contains(f) {
-        log::debug!("file to delete: {}", &f);
-        files_to_clean.insert((*file_receivers[f].clone().borrow()).clone());
-      }
-    }
-
-    for task in &self.tasks {
-      for f in task.get_copy_out() {
-        if !self.copy_out.contains(&f) {
-          log::debug!("file to delete: {}", &f);
-          files_to_clean.insert((*file_receivers[&f].clone().borrow()).clone());
-        }
-      }
-    }
-
-    // Clean unused file.
-    stream::iter(files_to_clean)
-      .for_each(|f| async {
-        log::debug!("file deleted: {}", &f);
-        _ = sandbox.file_delete(f).await;
-      })
       .await;
 
     return Ok(res);
@@ -208,8 +176,6 @@ pub enum Error {
   Parse(#[from] ParseError),
   #[error("execute error at {index}")]
   Execute { index: usize, source: ExecuteError },
-  #[error("sandbox error")]
-  Sandbox(#[from] tonic::Status),
 }
 
 /// Error when parsing.
@@ -249,7 +215,7 @@ pub enum ExecuteError {
   #[error("invalid lang")]
   InvalidLang(#[from] etc::InvalidLangError),
   #[error("runtime error")]
-  Runtime(#[from] result::Error),
+  Runtime(#[from] result::RuntimeError),
 }
 
 #[async_trait]
@@ -264,9 +230,8 @@ pub trait Cmd: std::fmt::Debug + Sync + Send {
   /// Execute the command.
   async fn exec(
     &self,
-    sandbox: &sandbox::Client,
-    copy_in_receivers: HashMap<String, watch::Receiver<String>>,
-    copy_out_senders: HashMap<String, watch::Sender<String>>,
+    copy_in_receivers: HashMap<String, FileReceiver>,
+    copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError>;
 }
 
@@ -296,9 +261,8 @@ impl Cmd for CompileCmd {
 
   async fn exec(
     &self,
-    sandbox: &sandbox::Client,
-    mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
-    mut copy_out_senders: HashMap<String, watch::Sender<String>>,
+    mut copy_in_receivers: HashMap<String, FileReceiver>,
+    mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
     let lang = etc::LangCfg::from_str(&self.lang).map_or(
       Err(ExecuteError::InvalidLang(etc::InvalidLangError {
@@ -310,16 +274,16 @@ impl Cmd for CompileCmd {
       let mut rx = copy_in_receivers.remove(&self.code).unwrap();
       rx.changed().await.unwrap();
       let x = (*rx.borrow()).clone();
-      proto::File::Cached(x.into())
+      x.unwrap()
     };
-    let copy_in: HashMap<String, proto::File> = stream::iter(&self.copy_in)
+    let copy_in: HashMap<_, _> = stream::iter(&self.copy_in)
       .then(|f| {
         let mut rx = copy_in_receivers.remove(f.1).unwrap();
         async move {
           (f.0.to_string(), {
             rx.changed().await.unwrap();
             let x = (*rx.borrow()).clone();
-            proto::File::Cached(x.into())
+            x.unwrap()
           })
         }
       })
@@ -328,10 +292,8 @@ impl Cmd for CompileCmd {
 
     log::debug!("compile for {} start", &self.exec);
 
-    let res = sandbox
-      .compile(&lang, self.args.clone(), code, copy_in)
-      .await?;
-    _ = copy_out_senders.remove(&self.exec).unwrap().send(res);
+    let res = compile::compile(&lang, self.args.clone(), code, copy_in).await?;
+    _ = copy_out_senders.remove(&self.exec).unwrap().send(Some(res));
 
     log::debug!("compile for {} finished", &self.exec);
 
@@ -365,9 +327,8 @@ impl Cmd for GenerateCmd {
 
   async fn exec(
     &self,
-    sandbox: &sandbox::Client,
-    mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
-    mut copy_out_senders: HashMap<String, watch::Sender<String>>,
+    mut copy_in_receivers: HashMap<String, FileReceiver>,
+    mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
     let lang = etc::LangCfg::from_str(&self.lang).map_or(
       Err(ExecuteError::InvalidLang(etc::InvalidLangError {
@@ -379,26 +340,27 @@ impl Cmd for GenerateCmd {
       let mut rx = copy_in_receivers.remove(&self.exec).unwrap();
       rx.changed().await.unwrap();
       let x = (*rx.borrow()).clone();
-      proto::File::Cached(x.into())
+      x.unwrap()
     };
-    let copy_in: HashMap<String, proto::File> = stream::iter(&self.copy_in)
+    let copy_in: HashMap<_, _> = stream::iter(&self.copy_in)
       .then(|f| {
         let mut rx = copy_in_receivers.remove(f.1).unwrap();
         async move {
           (f.0.to_string(), {
             rx.changed().await.unwrap();
             let x = (*rx.borrow()).clone();
-            proto::File::Cached(x.into())
+            x.unwrap()
           })
         }
       })
       .collect()
       .await;
 
-    let res = sandbox
-      .generate(&lang, self.args.clone(), exec, copy_in)
-      .await?;
-    _ = copy_out_senders.remove(&self.generated).unwrap().send(res);
+    let res = generator::generate(&lang, self.args.clone(), exec, copy_in).await?;
+    _ = copy_out_senders
+      .remove(&self.generated)
+      .unwrap()
+      .send(Some(res));
 
     return Ok(());
   }
@@ -442,9 +404,8 @@ impl Cmd for ValidateCmd {
 
   async fn exec(
     &self,
-    sandbox: &sandbox::Client,
-    mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
-    mut copy_out_senders: HashMap<String, watch::Sender<String>>,
+    mut copy_in_receivers: HashMap<String, FileReceiver>,
+    mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
     let lang = etc::LangCfg::from_str(&self.lang).map_or(
       Err(ExecuteError::InvalidLang(etc::InvalidLangError {
@@ -456,41 +417,37 @@ impl Cmd for ValidateCmd {
       let mut rx = copy_in_receivers.remove(&self.exec).unwrap();
       rx.changed().await.unwrap();
       let x = (*rx.borrow()).clone();
-      proto::File::Cached(x.into())
+      x.unwrap()
     };
     let inf = {
       let mut rx = copy_in_receivers.remove(&self.inf).unwrap();
       rx.changed().await.unwrap();
       let x = (*rx.borrow()).clone();
-      proto::File::Cached(x.into())
+      x.unwrap()
     };
-    let copy_in: HashMap<String, proto::File> = stream::iter(&self.copy_in)
+    let copy_in: HashMap<_, _> = stream::iter(&self.copy_in)
       .then(|f| {
         let mut rx = copy_in_receivers.remove(f.1).unwrap();
         async move {
           (f.0.to_string(), {
             rx.changed().await.unwrap();
             let x = (*rx.borrow()).clone();
-            proto::File::Cached(x.into())
+            x.unwrap()
           })
         }
       })
       .collect()
       .await;
 
-    let overview = sandbox
-      .validate(&lang, self.args.clone(), exec, inf, copy_in)
-      .await?;
+    let overview = validator::validate(&lang, self.args.clone(), exec, inf, copy_in).await?;
 
-    let report_id = sandbox
-      .file_add(bson::to_vec(&overview).unwrap())
-      .await
-      .map_or_else(|e| Err(ExecuteError::Runtime(e.into())), |x| Ok(x))?;
+    let report_file =
+      Arc::new(sandbox::FileHandle::upload(&rmp_serde::to_vec(&overview).unwrap()).await);
 
     _ = copy_out_senders
       .remove(&self.report)
       .unwrap()
-      .send(report_id);
+      .send(Some(report_file));
 
     return Ok(());
   }
@@ -526,9 +483,8 @@ impl Cmd for JudgeBatchCmd {
 
   async fn exec(
     &self,
-    sandbox: &sandbox::Client,
-    mut copy_in_receivers: HashMap<String, watch::Receiver<String>>,
-    mut copy_out_senders: HashMap<String, watch::Sender<String>>,
+    mut copy_in_receivers: HashMap<String, FileReceiver>,
+    mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
     let lang = etc::LangCfg::from_str(&self.lang).map_or(
       Err(ExecuteError::InvalidLang(etc::InvalidLangError {
@@ -540,48 +496,47 @@ impl Cmd for JudgeBatchCmd {
       let mut rx = copy_in_receivers.remove(&self.exec).unwrap();
       rx.changed().await.unwrap();
       let x = (*rx.borrow()).clone();
-      proto::File::Cached(x.into())
+      x.unwrap()
     };
     let inf = {
       let mut rx = copy_in_receivers.remove(&self.inf).unwrap();
       rx.changed().await.unwrap();
       let x = (*rx.borrow()).clone();
-      proto::File::Cached(x.into())
+      x.unwrap()
     };
-    let copy_in: HashMap<String, proto::File> = stream::iter(&self.copy_in)
+    let copy_in: HashMap<_, _> = stream::iter(&self.copy_in)
       .then(|f| {
         let mut rx = copy_in_receivers.remove(f.1).unwrap();
         async move {
           (f.0.to_string(), {
             rx.changed().await.unwrap();
             let x = (*rx.borrow()).clone();
-            proto::File::Cached(x.into())
+            x.unwrap()
           })
         }
       })
       .collect()
       .await;
 
-    let (res, copy_out_id) = sandbox
-      .judge_batch(
-        &lang,
-        self.args.clone(),
-        exec,
-        inf,
-        copy_in,
-        self.time_limit,
-        self.memory_limit,
-      )
-      .await;
+    let (res, copy_out_file) = judge::judge_batch(
+      &lang,
+      self.args.clone(),
+      exec,
+      inf,
+      copy_in,
+      self.time_limit,
+      self.memory_limit,
+    )
+    .await;
 
-    if res.status != result::ExecuteStatus::Accepted {
+    if res.status != sandbox::Status::Accepted {
       return Err(ExecuteError::Runtime(res.into()));
     }
 
     _ = copy_out_senders
       .remove(&self.copy_out)
       .unwrap()
-      .send(copy_out_id.unwrap());
+      .send(Some(copy_out_file.unwrap()));
     return Ok(());
   }
 }

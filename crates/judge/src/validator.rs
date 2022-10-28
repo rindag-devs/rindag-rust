@@ -1,13 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-  etc, result,
-  sandbox::{self, proto},
-  CONFIG,
-};
+use crate::{etc, result, sandbox};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct VariableBounds {
@@ -55,69 +51,52 @@ impl Overview {
   }
 }
 
-impl sandbox::Client {
-  /// Run the validator and returns the overview log file.
-  ///
-  /// It will do these following:
-  ///
-  /// 1. Constructs a sandbox request according to the validator language.
-  /// 2. Execute this request with sandbox.
-  /// 3. Check if there's an error happens, or return the parsed overview log.
-  ///
-  /// # Errors
-  ///
-  /// This function will return an error if validating abnormally
-  /// (e.g. validating time limit exceed or signaled)
-  /// or a sandbox internal error was encountered.
-  pub async fn validate(
-    &self,
-    lang: &etc::LangCfg,
-    args: Vec<String>,
-    exec: proto::File,
-    inf: proto::File,
-    mut copy_in: HashMap<String, proto::File>,
-  ) -> Result<Overview, result::Error> {
-    let c = &CONFIG.sandbox;
+/// Run the validator and returns the overview log file.
+///
+/// It will do these following:
+///
+/// 1. Constructs a sandbox request according to the validator language.
+/// 2. Execute this request with sandbox.
+/// 3. Check if there's an error happens, or return the parsed overview log.
+///
+/// # Errors
+///
+/// This function will return an error if validating abnormally
+/// (e.g. validating time limit exceed or signaled)
+/// or a sandbox internal error was encountered.
+pub async fn validate(
+  lang: &etc::LangCfg,
+  args: Vec<String>,
+  exec: Arc<sandbox::FileHandle>,
+  inf: Arc<sandbox::FileHandle>,
+  mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+) -> Result<Overview, result::RuntimeError> {
+  copy_in.insert(lang.exec.clone(), exec);
 
-    copy_in.insert(lang.exec.clone(), exec);
-
-    let cmd = proto::Cmd {
-      args: [
-        lang.run_cmd.clone(),
-        args,
-        [
-          "--testOverviewLogFileName".to_string(),
-          "val.log".to_string(),
-        ]
-        .to_vec(),
+  let res = sandbox::Request::Run(sandbox::Cmd {
+    args: [
+      lang.run_cmd.clone(),
+      args,
+      [
+        "--testOverviewLogFileName".to_string(),
+        "val.log".to_string(),
       ]
-      .concat(),
-      files: vec![
-        inf,
-        proto::File::Pipe(proto::PipeCollector {
-          name: "stdout".to_string(),
-          max: c.stdout_limit,
-          pipe: false,
-        }),
-        proto::File::Pipe(proto::PipeCollector {
-          name: "stderr".to_string(),
-          max: c.stderr_limit,
-          pipe: false,
-        }),
-      ],
-      copy_in,
-      copy_out: vec!["stderr".to_string(), "val.log".to_string()],
-      ..Default::default()
-    };
+      .to_vec(),
+    ]
+    .concat(),
+    stdin: Some(inf),
+    copy_in,
+    copy_out: vec!["stderr".to_string(), "val.log".to_string()],
+    ..Default::default()
+  })
+  .exec()
+  .await[0]
+    .clone();
 
-    return match self.exec(vec![cmd], vec![]).await {
-      Ok(res) => match res.results[0].status() {
-        proto::StatusType::Accepted => Ok(Overview::parse(&String::from_utf8_lossy(
-          &res.results[0].files["val.log"],
-        ))),
-        _ => Err(res.results[0].clone().into()),
-      },
-      Err(e) => Err(result::Error::Sandbox(e)),
-    };
+  match res.result.status {
+    sandbox::Status::Accepted => Ok(Overview::parse(&String::from_utf8_lossy(
+      &res.files["val.log"].clone().to_vec().await.unwrap(),
+    ))),
+    _ => Err(res.result.into()),
   }
 }

@@ -1,23 +1,18 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use crate::{
-  builtin, etc,
-  sandbox::{self, proto},
-  test, validator,
-};
+use crate::{builtin, compile, etc, sandbox, validator};
 
-#[tokio::test]
-async fn test_val_a_plus_b() {
-  test::init();
+#[test]
+fn test_val_a_plus_b() {
+  super::test_rt().block_on(async {
+    super::init();
 
-  let sandbox = sandbox::Client::from_global_config().await;
-
-  let exec_id = sandbox
-    .compile(
+    let exec_file = compile::compile(
       &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
-      proto::File::Memory(
-        "
+      Arc::new(
+        sandbox::FileHandle::upload(
+          "
         #include\"testlib.h\"
         signed main(signed argc,char**argv){
           registerValidation(argc,argv);
@@ -34,16 +29,19 @@ async fn test_val_a_plus_b() {
           if(a+b==0)feature(\"sum_0\");
         }
         "
-        .into(),
+          .as_bytes(),
+        )
+        .await,
       ),
       [(
         "testlib.h".to_string(),
-        proto::File::Memory(
-          builtin::Testlib::get("testlib.h")
-            .unwrap()
-            .data
-            .to_vec()
-            .into(),
+        Arc::new(
+          sandbox::FileHandle::upload(
+            &builtin::File::from_str("testlib:testlib.h")
+              .unwrap()
+              .as_bytes(),
+          )
+          .await,
         ),
       )]
       .into(),
@@ -51,91 +49,88 @@ async fn test_val_a_plus_b() {
     .await
     .unwrap();
 
-  assert_eq!(
-    sandbox
-      .validate(
+    assert_eq!(
+      validator::validate(
         &etc::LangCfg::from_str("cpp").unwrap(),
         vec!["--group".to_string(), "even_a_and_b".to_string()],
-        proto::File::Cached(exec_id.clone().into()),
-        proto::File::Memory("0 -10\n".into()),
+        exec_file.clone(),
+        Arc::new(sandbox::FileHandle::upload("0 -10\n".as_bytes()).await),
         HashMap::new(),
       )
       .await
       .unwrap(),
-    validator::Overview {
-      variables: [
-        (
-          "a".to_string(),
-          validator::VariableBounds {
-            hit_min: false,
-            hit_max: false
-          }
-        ),
-        (
-          "b".to_string(),
-          validator::VariableBounds {
-            hit_min: false,
-            hit_max: false
-          }
-        ),
-      ]
-      .into(),
-      features: [("sum_0".to_string(), false)].into(),
-    }
-  );
+      validator::Overview {
+        variables: [
+          (
+            "a".to_string(),
+            validator::VariableBounds {
+              hit_min: false,
+              hit_max: false
+            }
+          ),
+          (
+            "b".to_string(),
+            validator::VariableBounds {
+              hit_min: false,
+              hit_max: false
+            }
+          ),
+        ]
+        .into(),
+        features: [("sum_0".to_string(), false)].into(),
+      }
+    );
 
-  assert_eq!(
-    sandbox
-      .validate(
+    assert_eq!(
+      validator::validate(
         &etc::LangCfg::from_str("cpp").unwrap(),
         vec![],
-        proto::File::Cached(exec_id.clone().into()),
-        proto::File::Memory("-100 100\n".into()),
+        exec_file.clone(),
+        Arc::new(sandbox::FileHandle::upload("-100 100\n".as_bytes()).await),
         HashMap::new(),
       )
       .await
       .unwrap(),
-    validator::Overview {
-      variables: [
-        (
-          "a".to_string(),
-          validator::VariableBounds {
-            hit_min: true,
-            hit_max: false
-          }
-        ),
-        (
-          "b".to_string(),
-          validator::VariableBounds {
-            hit_min: false,
-            hit_max: true
-          }
-        ),
-      ]
-      .into(),
-      features: [("sum_0".to_string(), true)].into(),
-    }
-  );
+      validator::Overview {
+        variables: [
+          (
+            "a".to_string(),
+            validator::VariableBounds {
+              hit_min: true,
+              hit_max: false
+            }
+          ),
+          (
+            "b".to_string(),
+            validator::VariableBounds {
+              hit_min: false,
+              hit_max: true
+            }
+          ),
+        ]
+        .into(),
+        features: [("sum_0".to_string(), true)].into(),
+      }
+    );
 
-  assert!(sandbox
-    .validate(
+    assert!(validator::validate(
       &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
-      proto::File::Cached(exec_id.clone().into()),
-      proto::File::Memory("-100 101\n".into()),
+      exec_file.clone(),
+      Arc::new(sandbox::FileHandle::upload("-100 101\n".as_bytes()).await),
       HashMap::new(),
     )
     .await
     .is_err());
 
-  assert!(sandbox
-    .validate(
+    assert!(validator::validate(
       &etc::LangCfg::from_str("cpp").unwrap(),
       vec!["--group".to_string(), "even_a_and_b".to_string()],
-      proto::File::Cached(exec_id.clone().into()),
-      proto::File::Memory("1 2\n".into()),
+      exec_file.clone(),
+      Arc::new(sandbox::FileHandle::upload("1 2\n".as_bytes()).await),
       HashMap::new(),
     )
     .await
     .is_err());
+  });
 }

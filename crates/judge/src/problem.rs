@@ -4,10 +4,7 @@ use futures::{stream, Future, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{oneshot, watch};
 
-use crate::{
-  etc, file, result,
-  sandbox::{self, proto},
-};
+use crate::{checker, compile, etc, file, judge, result, sandbox};
 
 /// Parsed problem.
 pub struct Problem {
@@ -75,31 +72,22 @@ impl Subtask {
   /// which means it will ignore the `score` felid of `self`．
   async fn judge(
     &self,
-    sandbox: Arc<sandbox::Client>,
     subtask_id: u32,
-    exec: String,
+    exec: Arc<sandbox::FileHandle>,
     exec_lang: &etc::LangCfg,
-    checker: String,
+    checker: Arc<sandbox::FileHandle>,
     checker_lang: &etc::LangCfg,
-    user_copy_in: HashMap<String, proto::File>,
-    judge_copy_in: HashMap<String, proto::File>,
+    user_copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+    judge_copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
   ) -> (f32, Vec<result::Record>) {
     let mut inf = Vec::with_capacity(self.tests.len());
     let mut ans = Vec::with_capacity(self.tests.len());
 
     // Upload the test files to sandbox.
     for test in &self.tests {
-      for (f, file_id) in [(&test.input, &mut inf), (&test.answer, &mut ans)] {
-        let content = f.get_content();
-        file_id.push(match sandbox.file_add(content).await {
-          Ok(x) => x,
-          Err(err) => {
-            return (
-              0.,
-              vec![result::Record::new(err.into(), None); self.tests.len()],
-            )
-          }
-        });
+      for (f, file) in [(&test.input, &mut inf), (&test.answer, &mut ans)] {
+        let content = f.as_bytes();
+        file.push(Arc::new(sandbox::FileHandle::upload(content).await));
       }
     }
 
@@ -113,20 +101,18 @@ impl Subtask {
         let inf = inf[i].clone();
         let exec = exec.clone();
         let judge_copy_in = judge_copy_in.clone();
-        let sandbox = sandbox.clone();
 
         coroutines.push(Box::pin(async move {
-          let (result, ouf) = sandbox
-            .judge_batch(
-              &exec_lang,
-              vec![],
-              proto::File::Cached(exec.into()),
-              proto::File::Cached(inf.into()),
-              judge_copy_in,
-              self.time_limit,
-              self.memory_limit,
-            )
-            .await;
+          let (result, ouf) = judge::judge_batch(
+            &exec_lang,
+            vec![],
+            exec,
+            inf,
+            judge_copy_in,
+            self.time_limit,
+            self.memory_limit,
+          )
+          .await;
           res_tx.send(result).unwrap();
           ouf_tx.send(ouf).unwrap();
         }));
@@ -134,7 +120,6 @@ impl Subtask {
 
       {
         let inf = inf[i].clone();
-        let sandbox = sandbox.clone();
         let checker = checker.clone();
         let user_copy_in = user_copy_in.clone();
         let ans = ans[i].clone();
@@ -150,28 +135,27 @@ impl Subtask {
             return;
           }
           let ouf = ouf.unwrap();
-          let checker_res = sandbox
-            .check(
-              &checker_lang,
-              vec![
-                "--testset".to_string(),
-                testset.to_string(),
-                "--group".to_string(),
-                subtask_id.to_string(),
-              ],
-              proto::File::Cached(checker.into()),
-              proto::File::Cached(inf.into()),
-              proto::File::Cached(ouf.into()),
-              proto::File::Cached(ans.into()),
-              user_copy_in,
-            )
-            .await;
+          let checker_res = checker::check(
+            &checker_lang,
+            vec![
+              "--testset".to_string(),
+              testset.to_string(),
+              "--group".to_string(),
+              subtask_id.to_string(),
+            ],
+            checker,
+            inf,
+            ouf,
+            ans,
+            user_copy_in,
+          )
+          .await;
 
           match checker_res {
             Ok(c) => record_tx.send(result::Record::new(res, Some(c))).unwrap(),
             Err(err) => {
               let mut record = result::Record::new(res, None);
-              record.checker_message = format!("error: {}", err.to_string());
+              record.message = format!("error: checker judgement failed: {}", err.to_string());
               record_tx.send(record).unwrap()
             }
           };
@@ -195,48 +179,29 @@ impl Subtask {
 }
 
 impl Problem {
-  pub async fn judge(
-    &self,
-    sandbox: Arc<sandbox::Client>,
-    sol_code: SourceCode,
-  ) -> result::JudgeResult {
+  pub async fn judge(&self, sol_code: SourceCode) -> result::JudgeResult {
     // Prepare copy in files.
-    let user_copy_in: HashMap<String, proto::File> = match stream::iter(&self.user_copy_in)
+    let user_copy_in: HashMap<_, _> = stream::iter(&self.user_copy_in)
       .then(|f| async {
-        Ok((
+        (
           f.0.to_string(),
-          proto::File::Cached(sandbox.file_add(f.1.get_content()).await?.into()),
-        ))
+          Arc::new(sandbox::FileHandle::upload(f.1.as_bytes()).await),
+        )
       })
-      .collect::<Vec<_>>()
-      .await
-      .into_iter()
-      .collect::<Result<_, tonic::Status>>()
-    {
-      Ok(x) => x,
-      Err(err) => return err.into(),
-    };
-    let judge_copy_in: HashMap<String, proto::File> = match stream::iter(&self.judge_copy_in)
+      .collect()
+      .await;
+    let judge_copy_in: HashMap<_, _> = stream::iter(&self.judge_copy_in)
       .then(|f| async {
-        Ok((
+        (
           f.0.to_string(),
-          proto::File::Cached(sandbox.file_add(f.1.get_content()).await?.into()),
-        ))
+          Arc::new(sandbox::FileHandle::upload(f.1.as_bytes()).await),
+        )
       })
-      .collect::<Vec<_>>()
-      .await
-      .into_iter()
-      .collect::<Result<_, tonic::Status>>()
-    {
-      Ok(x) => x,
-      Err(err) => return err.into(),
-    };
+      .collect()
+      .await;
 
     // Compile solution code.
-    let sol_code_id = match sandbox.file_add(sol_code.data.get_content()).await {
-      Ok(x) => x,
-      Err(err) => return err.into(),
-    };
+    let sol_code_file = Arc::new(sandbox::FileHandle::upload(sol_code.data.as_bytes()).await);
     let sol_lang = match etc::LangCfg::from_str(&sol_code.lang) {
       Ok(l) => l,
       Err(err) => {
@@ -246,24 +211,15 @@ impl Problem {
       }
     };
 
-    let sol_exec_id = match sandbox
-      .compile(
-        &sol_lang,
-        vec![],
-        proto::File::Cached(sol_code_id.into()),
-        user_copy_in.clone(),
-      )
-      .await
-    {
-      Ok(x) => x,
-      Err(err) => return result::JudgeResult::from_compile_error(err),
-    };
+    let sol_exec_file =
+      match compile::compile(&sol_lang, vec![], sol_code_file, user_copy_in.clone()).await {
+        Ok(x) => x,
+        Err(err) => return result::JudgeResult::from_compile_error(err),
+      };
 
     // Compile checker.
-    let checker_code_id = match sandbox.file_add(self.checker.data.get_content()).await {
-      Ok(x) => x,
-      Err(err) => return err.into(),
-    };
+    let checker_code_file =
+      Arc::new(sandbox::FileHandle::upload(self.checker.data.as_bytes()).await);
     let checker_lang = match etc::LangCfg::from_str(&self.checker.lang) {
       Ok(l) => l,
       Err(err) => {
@@ -273,14 +229,13 @@ impl Problem {
       }
     };
 
-    let checker_exec_id = match sandbox
-      .compile(
-        &checker_lang,
-        vec![],
-        proto::File::Cached(checker_code_id.into()),
-        user_copy_in.clone(),
-      )
-      .await
+    let checker_exec_file = match compile::compile(
+      &checker_lang,
+      vec![],
+      checker_code_file,
+      user_copy_in.clone(),
+    )
+    .await
     {
       Ok(x) => x,
       Err(err) => return result::JudgeResult::from_compile_error(err),
@@ -301,10 +256,9 @@ impl Problem {
         .iter()
         .map(|d| score_rx[*d].clone())
         .collect();
-      let sandbox = sandbox.clone();
-      let sol_exec_id = sol_exec_id.clone();
+      let sol_exec_file = sol_exec_file.clone();
       let sol_lang = sol_lang.clone();
-      let checker_exec_id = checker_exec_id.clone();
+      let checker_exec_file = checker_exec_file.clone();
       let checker_lang = checker_lang.clone();
       let user_copy_in = user_copy_in.clone();
       let judge_copy_in = judge_copy_in.clone();
@@ -323,11 +277,10 @@ impl Problem {
         }
         let (cur_score, result) = subtask
           .judge(
-            sandbox,
             i as u32,
-            sol_exec_id,
+            sol_exec_file,
             &sol_lang,
-            checker_exec_id,
+            checker_exec_file,
             &checker_lang,
             user_copy_in,
             judge_copy_in,

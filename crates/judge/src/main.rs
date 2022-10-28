@@ -24,6 +24,5 @@ extern crate lazy_static;
 extern crate log;
 
 fn main() -> Result<(), Box<dyn Error>> {
-  dbg!(&*CONFIG);
-  return Ok(());
+  todo!();
 }

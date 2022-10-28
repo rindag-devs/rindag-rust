@@ -1,23 +1,18 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use crate::{
-  builtin, etc,
-  sandbox::{self, proto},
-  test,
-};
+use crate::{builtin, compile, etc, generator, sandbox};
 
-#[tokio::test]
-async fn test_simple() {
-  test::init();
+#[test]
+fn test_simple() {
+  super::test_rt().block_on(async {
+    super::init();
 
-  let sandbox = sandbox::Client::from_global_config().await;
-
-  let exec_id = sandbox
-    .compile(
+    let exec_file = compile::compile(
       &etc::LangCfg::from_str("cpp").unwrap(),
       vec![],
-      proto::File::Memory(
-        "
+      Arc::new(
+        sandbox::FileHandle::upload(
+          "
         #include\"testlib.h\"
         #include<iostream>
         signed main(signed argc,char**argv){
@@ -26,16 +21,19 @@ async fn test_simple() {
           std::cout<<n<<'\\n';
         }
         "
-        .into(),
+          .as_bytes(),
+        )
+        .await,
       ),
       [(
         "testlib.h".to_string(),
-        proto::File::Memory(
-          builtin::Testlib::get("testlib.h")
-            .unwrap()
-            .data
-            .to_vec()
-            .into(),
+        Arc::new(
+          sandbox::FileHandle::upload(
+            &builtin::File::from_str("testlib:testlib.h")
+              .unwrap()
+              .as_bytes(),
+          )
+          .await,
         ),
       )]
       .into(),
@@ -43,18 +41,19 @@ async fn test_simple() {
     .await
     .unwrap();
 
-  let file_id = sandbox
-    .generate(
-      &etc::LangCfg::from_str("cpp").unwrap(),
-      vec!["-n".to_string(), "100".to_string()],
-      proto::File::Cached(exec_id.into()),
-      HashMap::new(),
-    )
-    .await
-    .unwrap();
-
-  assert_eq!(
-    sandbox.file_get(file_id).await.unwrap().content,
-    "100\n".as_bytes()
-  );
+    assert_eq!(
+      generator::generate(
+        &etc::LangCfg::from_str("cpp").unwrap(),
+        vec!["-n".to_string(), "100".to_string()],
+        exec_file,
+        HashMap::new(),
+      )
+      .await
+      .unwrap()
+      .to_vec()
+      .await
+      .unwrap(),
+      "100\n".as_bytes()
+    );
+  });
 }

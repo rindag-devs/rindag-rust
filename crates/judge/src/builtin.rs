@@ -22,9 +22,9 @@ pub struct Checker;
 /// A parsed builtin file.
 #[derive(Debug, Clone, SerializeDisplay, DeserializeFromStr)]
 pub struct File {
-  pub folder: String,
-  pub path: String,
-  pub content: Cow<'static, [u8]>,
+  folder: String,
+  path: String,
+  content: Cow<'static, [u8]>,
 }
 
 impl FromStr for File {
@@ -34,7 +34,7 @@ impl FromStr for File {
     // Convert a string to builtin file.
     //
     // Format:
-    //   folder:path/to/file.txt
+    //   folder:path/to/file
 
     lazy_static! {
       static ref PAT: Regex = Regex::new(r"(?s)^(\w+):(.*)$").unwrap();
@@ -67,6 +67,12 @@ impl FromStr for File {
 impl Display for File {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     write!(f, "{}:{}", self.folder, self.path)
+  }
+}
+
+impl File {
+  pub fn as_bytes(&self) -> &[u8] {
+    return &self.content;
   }
 }
 

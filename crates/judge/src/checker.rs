@@ -1,14 +1,10 @@
-use std::{collections::HashMap, str::FromStr, time};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use strum::Display;
-use thiserror::Error;
 
-use crate::{
-  etc, result,
-  sandbox::{self, proto},
-};
+use crate::{etc, result, sandbox};
 
 #[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone, Display)]
 #[strum(serialize_all = "snake_case")]
@@ -105,82 +101,46 @@ impl Output {
   }
 }
 
-/// Error when the checker behaves abnormally.
+/// Run the checker with input, output and answer file.
 ///
-/// Such as being compile limit exceed or signaled.
-#[derive(Debug, Error)]
-pub enum Error {
-  #[error(
-    "checker runs failed (status: {status:?}, \
-    time: {time:?}, memory: {memory} bytes, message: {message})"
-  )]
-  Execute {
-    status: proto::StatusType,
-    time: time::Duration,
-    memory: u64,
-    message: String,
-    exit_code: i32,
-  },
+/// Returns the parsed testlib output.
+pub async fn check(
+  lang: &etc::LangCfg,
+  args: Vec<String>,
+  exec: Arc<sandbox::FileHandle>,
+  inf: Arc<sandbox::FileHandle>,
+  ouf: Arc<sandbox::FileHandle>,
+  ans: Arc<sandbox::FileHandle>,
+  mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+) -> Result<Output, result::RuntimeError> {
+  copy_in.insert(lang.exec.clone(), exec);
+  copy_in.insert("inf.txt".to_string(), inf);
+  copy_in.insert("ouf.txt".to_string(), ouf);
+  copy_in.insert("ans.txt".to_string(), ans);
 
-  #[error("sandbox error")]
-  Sandbox(#[from] tonic::Status),
-}
+  let res = sandbox::Request::Run(sandbox::Cmd {
+    args: [
+      lang.run_cmd.clone(),
+      vec![
+        "inf.txt".to_string(),
+        "ouf.txt".to_string(),
+        "ans.txt".to_string(),
+      ],
+      args,
+    ]
+    .concat(),
+    copy_in,
+    copy_out: vec!["stderr".to_string()],
+    ..Default::default()
+  })
+  .exec()
+  .await[0]
+    .clone();
 
-impl From<proto::Result> for Error {
-  fn from(res: proto::Result) -> Self {
-    return Self::Execute {
-      status: res.status(),
-      message: result::limit_message(&String::from_utf8_lossy(&res.files["stderr"])),
-      memory: res.memory,
-      time: time::Duration::from_nanos(res.time),
-      exit_code: res.exit_status,
-    };
-  }
-}
-
-impl sandbox::Client {
-  /// Run the checker with input, output and answer file.
-  ///
-  /// Returns the parsed testlib output.
-  pub async fn check(
-    &self,
-    lang: &etc::LangCfg,
-    args: Vec<String>,
-    exec: proto::File,
-    inf: proto::File,
-    ouf: proto::File,
-    ans: proto::File,
-    mut copy_in: HashMap<String, proto::File>,
-  ) -> Result<Output, Error> {
-    copy_in.insert(lang.exec.clone(), exec);
-    copy_in.insert("inf.txt".to_string(), inf);
-    copy_in.insert("ouf.txt".to_string(), ouf);
-    copy_in.insert("ans.txt".to_string(), ans);
-
-    let cmd = proto::Cmd {
-      args: [
-        lang.run_cmd.clone(),
-        vec![
-          "inf.txt".to_string(),
-          "ouf.txt".to_string(),
-          "ans.txt".to_string(),
-        ],
-        args,
-      ]
-      .concat(),
-      copy_in,
-      copy_out: vec!["stderr".to_string()],
-      ..Default::default()
-    };
-
-    return match self.exec(vec![cmd], vec![]).await {
-      Ok(res) => match res.results[0].status() {
-        proto::StatusType::Accepted | proto::StatusType::NonZeroExitStatus => Ok(Output::parse(
-          &String::from_utf8_lossy(&res.results[0].files["stderr"]),
-        )),
-        _ => Err(res.results[0].clone().into()),
-      },
-      Err(e) => Err(Error::Sandbox(e)),
-    };
+  match res.result.status {
+    sandbox::Status::Accepted | sandbox::Status::NonZeroExitStatus => Ok(Output::parse(
+      &String::from_utf8_lossy(&res.files["stderr"].to_vec().await.unwrap()),
+    )),
+    _ => Err(res.result.into()),
   }
 }

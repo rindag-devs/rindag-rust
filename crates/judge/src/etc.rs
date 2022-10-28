@@ -27,6 +27,8 @@ pub struct Cfg {
 
   pub lang: HashSet<LangCfg>,
 
+  pub judge: JudgeCfg,
+
   pub sandbox: SandboxCfg,
 }
 
@@ -76,7 +78,7 @@ impl Default for Cfg {
           exec: "foo".to_string(),
         },
       ]),
-      sandbox: SandboxCfg {
+      judge: JudgeCfg {
         env: vec![
           "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
           "HOME=/w".to_string(),
@@ -87,6 +89,8 @@ impl Default for Cfg {
         process_limit: 16,                // 16 processes
         stdout_limit: 512 * 1024 * 1024,  // 512 MB
         stderr_limit: 16 * 1024,          // 16 kB
+      },
+      sandbox: SandboxCfg {
         host: "http://localhost:5051".to_string(),
         max_job: 2,
       },
@@ -160,9 +164,9 @@ impl Display for LangCfg {
   }
 }
 
-/// Sandbox config.
+/// Judge config.
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SandboxCfg {
+pub struct JudgeCfg {
   /// Environment variables.
   pub env: Vec<String>,
 
@@ -181,8 +185,12 @@ pub struct SandboxCfg {
 
   /// Default stderr limit, in bytes.
   pub stderr_limit: i64,
+}
 
-  /// Sandbox gRpc server host address.
+/// Sandbox config.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SandboxCfg {
+  /// Sandbox gRPC server host address.
   pub host: String,
 
   /// Max job count running in the same time.

@@ -12,3 +12,14 @@ fn init() {
     .is_test(true)
     .try_init();
 }
+
+#[cfg(test)]
+fn test_rt() -> &'static tokio::runtime::Runtime {
+  lazy_static! {
+    static ref RT: tokio::runtime::Runtime = tokio::runtime::Builder::new_multi_thread()
+      .enable_all()
+      .build()
+      .expect("should create a tokio runtime");
+  }
+  &RT
+}
