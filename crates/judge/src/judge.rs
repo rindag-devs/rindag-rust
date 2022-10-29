@@ -18,10 +18,10 @@ pub async fn judge_batch(
   time_limit: time::Duration,
   memory_limit: u64,
 ) -> (sandbox::ExecuteResult, Option<Arc<sandbox::FileHandle>>) {
-  copy_in.insert(lang.exec.clone(), exec);
+  copy_in.insert(lang.exec().to_string(), exec);
 
   let res = sandbox::Request::Run(sandbox::Cmd {
-    args: [lang.run_cmd.clone(), args].concat(),
+    args: [lang.run_cmd().clone(), args].concat(),
     stdin: Some(inf),
     copy_in,
     copy_out: vec!["stdout".to_string(), "stderr".to_string()],

@@ -71,11 +71,11 @@ pub async fn validate(
   inf: Arc<sandbox::FileHandle>,
   mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
 ) -> Result<Overview, result::RuntimeError> {
-  copy_in.insert(lang.exec.clone(), exec);
+  copy_in.insert(lang.exec().to_string(), exec);
 
   let res = sandbox::Request::Run(sandbox::Cmd {
     args: [
-      lang.run_cmd.clone(),
+      lang.run_cmd().clone(),
       args,
       [
         "--testOverviewLogFileName".to_string(),

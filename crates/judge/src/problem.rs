@@ -2,7 +2,7 @@ use std::{collections::HashMap, mem, pin::Pin, str::FromStr, sync::Arc, time};
 
 use futures::{stream, Future, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{checker, compile, etc, file, judge, result, sandbox};
 
@@ -72,13 +72,14 @@ impl Subtask {
   /// which means it will ignore the `score` felid of `self`．
   async fn judge(
     &self,
-    subtask_id: u32,
+    subtask_id: usize,
     exec: Arc<sandbox::FileHandle>,
     exec_lang: &etc::LangCfg,
     checker: Arc<sandbox::FileHandle>,
     checker_lang: &etc::LangCfg,
     user_copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
     judge_copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+    status_tx: mpsc::UnboundedSender<Status>,
   ) -> (f32, Vec<result::Record>) {
     let mut inf = Vec::with_capacity(self.tests.len());
     let mut ans = Vec::with_capacity(self.tests.len());
@@ -91,7 +92,7 @@ impl Subtask {
       }
     }
 
-    let mut coroutines: Vec<Pin<Box<dyn Future<Output = ()>>>> =
+    let mut coroutines: Vec<Pin<Box<dyn Future<Output = ()> + Send>>> =
       Vec::with_capacity(self.tests.len() * 2);
     let mut records = Vec::with_capacity(self.tests.len());
     for i in 0..self.tests.len() {
@@ -125,13 +126,19 @@ impl Subtask {
         let ans = ans[i].clone();
         let testset = self.testset.clone();
         let (record_tx, record_rx) = oneshot::channel();
+        let status_sender = status_tx.clone();
         records.push(record_rx);
 
         coroutines.push(Box::pin(async move {
           let ouf = ouf_rx.await.unwrap();
           let res = res_rx.await.unwrap();
           if ouf.is_none() {
-            record_tx.send(result::Record::new(res, None)).unwrap();
+            let record = result::Record::new(res, None);
+            _ = status_sender.send(Status::CompleteOne {
+              subtask_id,
+              record: record.clone(),
+            });
+            record_tx.send(record).unwrap();
             return;
           }
           let ouf = ouf.unwrap();
@@ -151,14 +158,19 @@ impl Subtask {
           )
           .await;
 
-          match checker_res {
-            Ok(c) => record_tx.send(result::Record::new(res, Some(c))).unwrap(),
+          let record = match checker_res {
+            Ok(c) => result::Record::new(res, Some(c)),
             Err(err) => {
               let mut record = result::Record::new(res, None);
               record.message = format!("error: checker judgement failed: {}", err.to_string());
-              record_tx.send(record).unwrap()
+              record
             }
           };
+          _ = status_sender.send(Status::CompleteOne {
+            subtask_id,
+            record: record.clone(),
+          });
+          record_tx.send(record).unwrap();
         }));
       }
     }
@@ -179,129 +191,170 @@ impl Subtask {
 }
 
 impl Problem {
-  pub async fn judge(&self, sol_code: SourceCode) -> result::JudgeResult {
-    // Prepare copy in files.
-    let user_copy_in: HashMap<_, _> = stream::iter(&self.user_copy_in)
-      .then(|f| async {
-        (
-          f.0.to_string(),
-          Arc::new(sandbox::FileHandle::upload(f.1.as_bytes()).await),
-        )
-      })
-      .collect()
-      .await;
-    let judge_copy_in: HashMap<_, _> = stream::iter(&self.judge_copy_in)
-      .then(|f| async {
-        (
-          f.0.to_string(),
-          Arc::new(sandbox::FileHandle::upload(f.1.as_bytes()).await),
-        )
-      })
-      .collect()
-      .await;
+  pub fn judge(self: Arc<Self>, sol_code: SourceCode) -> mpsc::UnboundedReceiver<Status> {
+    let (status_tx, status_rx) = mpsc::unbounded_channel();
 
-    // Compile solution code.
-    let sol_code_file = Arc::new(sandbox::FileHandle::upload(sol_code.data.as_bytes()).await);
-    let sol_lang = match etc::LangCfg::from_str(&sol_code.lang) {
-      Ok(l) => l,
-      Err(err) => {
-        return result::JudgeResult::CompileError {
-          message: err.to_string(),
+    tokio::spawn(async move {
+      // Prepare copy in files.
+      let user_copy_in: HashMap<_, _> = stream::iter(&self.user_copy_in)
+        .then(|f| async {
+          (
+            f.0.to_string(),
+            Arc::new(sandbox::FileHandle::upload(f.1.as_bytes()).await),
+          )
+        })
+        .collect()
+        .await;
+      let judge_copy_in: HashMap<_, _> = stream::iter(&self.judge_copy_in)
+        .then(|f| async {
+          (
+            f.0.to_string(),
+            Arc::new(sandbox::FileHandle::upload(f.1.as_bytes()).await),
+          )
+        })
+        .collect()
+        .await;
+
+      // Compile solution code.
+      let sol_code_file = Arc::new(sandbox::FileHandle::upload(sol_code.data.as_bytes()).await);
+      let sol_lang = match etc::LangCfg::from_str(&sol_code.lang) {
+        Ok(l) => l,
+        Err(err) => {
+          _ = status_tx.send(Status::CompileErr {
+            message: err.to_string(),
+          });
+          return;
         }
-      }
-    };
-
-    let sol_exec_file =
-      match compile::compile(&sol_lang, vec![], sol_code_file, user_copy_in.clone()).await {
-        Ok(x) => x,
-        Err(err) => return result::JudgeResult::from_compile_error(err),
       };
 
-    // Compile checker.
-    let checker_code_file =
-      Arc::new(sandbox::FileHandle::upload(self.checker.data.as_bytes()).await);
-    let checker_lang = match etc::LangCfg::from_str(&self.checker.lang) {
-      Ok(l) => l,
-      Err(err) => {
-        return result::JudgeResult::CompileError {
-          message: err.to_string(),
+      let sol_exec_file =
+        match compile::compile(&sol_lang, vec![], sol_code_file, user_copy_in.clone()).await {
+          Ok(x) => x,
+          Err(err) => {
+            _ = status_tx.send(Status::from_compile_error(err));
+            return;
+          }
+        };
+
+      // Compile checker.
+      let checker_code_file =
+        Arc::new(sandbox::FileHandle::upload(self.checker.data.as_bytes()).await);
+      let checker_lang = match etc::LangCfg::from_str(&self.checker.lang) {
+        Ok(l) => l,
+        Err(err) => {
+          _ = status_tx.send(Status::CompileErr {
+            message: err.to_string(),
+          });
+          return;
         }
+      };
+
+      let checker_exec_file = match compile::compile(
+        &checker_lang,
+        vec![],
+        checker_code_file,
+        user_copy_in.clone(),
+      )
+      .await
+      {
+        Ok(x) => x,
+        Err(err) => {
+          _ = status_tx.send(Status::from_compile_error(err));
+          return;
+        }
+      };
+
+      let mut score_tx = Vec::with_capacity(self.subtasks.len());
+      let mut score_rx = Vec::with_capacity(self.subtasks.len());
+      let mut coroutines = futures::stream::FuturesOrdered::new();
+      for _ in 0..self.subtasks.len() {
+        let (tx, rx) = watch::channel(0.);
+        score_tx.push(Some(tx));
+        score_rx.push(rx);
       }
-    };
-
-    let checker_exec_file = match compile::compile(
-      &checker_lang,
-      vec![],
-      checker_code_file,
-      user_copy_in.clone(),
-    )
-    .await
-    {
-      Ok(x) => x,
-      Err(err) => return result::JudgeResult::from_compile_error(err),
-    };
-
-    let mut score_tx = Vec::with_capacity(self.subtasks.len());
-    let mut score_rx = Vec::with_capacity(self.subtasks.len());
-    let mut coroutines = futures::stream::FuturesOrdered::new();
-    for _ in 0..self.subtasks.len() {
-      let (tx, rx) = watch::channel(0.);
-      score_tx.push(Some(tx));
-      score_rx.push(rx);
-    }
-    for (i, subtask) in self.subtasks.iter().enumerate() {
-      let score_tx = mem::replace(&mut score_tx[i], None).unwrap();
-      let dep_score_rx: Vec<_> = subtask
-        .dependences
-        .iter()
-        .map(|d| score_rx[*d].clone())
-        .collect();
-      let sol_exec_file = sol_exec_file.clone();
-      let sol_lang = sol_lang.clone();
-      let checker_exec_file = checker_exec_file.clone();
-      let checker_lang = checker_lang.clone();
-      let user_copy_in = user_copy_in.clone();
-      let judge_copy_in = judge_copy_in.clone();
-      coroutines.push_back(async move {
-        let mut score = stream::iter(dep_score_rx)
-          .fold(1f32, |score, mut rx| async move {
-            score.min({
-              rx.changed().await.unwrap();
-              (*rx.borrow()).clone()
+      for (i, subtask) in self.subtasks.iter().enumerate() {
+        let score_tx = mem::replace(&mut score_tx[i], None).unwrap();
+        let dep_score_rx: Vec<_> = subtask
+          .dependences
+          .iter()
+          .map(|d| score_rx[*d].clone())
+          .collect();
+        let sol_exec_file = sol_exec_file.clone();
+        let sol_lang = sol_lang.clone();
+        let checker_exec_file = checker_exec_file.clone();
+        let checker_lang = checker_lang.clone();
+        let user_copy_in = user_copy_in.clone();
+        let judge_copy_in = judge_copy_in.clone();
+        let status_tx = status_tx.clone();
+        coroutines.push_back(async move {
+          let mut score = stream::iter(dep_score_rx)
+            .fold(1f32, |score, mut rx| async move {
+              score.min({
+                rx.changed().await.unwrap();
+                (*rx.borrow()).clone()
+              })
             })
-          })
-          .await;
-        if score == 0. {
-          score_tx.send(0.).unwrap();
-          return vec![result::RECORD_SKIPPED.clone(); subtask.tests.len()];
-        }
-        let (cur_score, result) = subtask
-          .judge(
-            i as u32,
-            sol_exec_file,
-            &sol_lang,
-            checker_exec_file,
-            &checker_lang,
-            user_copy_in,
-            judge_copy_in,
-          )
-          .await;
-        score = score.min(cur_score);
-        score_tx.send(score).unwrap();
-        return result;
+            .await;
+          if score == 0. {
+            score_tx.send(0.).unwrap();
+            return vec![result::RECORD_SKIPPED.clone(); subtask.tests.len()];
+          }
+          let (cur_score, result) = subtask
+            .judge(
+              i,
+              sol_exec_file,
+              &sol_lang,
+              checker_exec_file,
+              &checker_lang,
+              user_copy_in,
+              judge_copy_in,
+              status_tx,
+            )
+            .await;
+          score = score.min(cur_score);
+          score_tx.send(score).unwrap();
+          return result;
+        });
+      }
+
+      let subtask_results: Vec<_> = coroutines.collect().await;
+
+      let mut sum_score = 0.;
+      for (i, subtask) in self.subtasks.iter().enumerate() {
+        sum_score += subtask.score * *score_rx[i].borrow();
+      }
+
+      _ = status_tx.send(Status::Finished {
+        score: sum_score,
+        results: subtask_results,
       });
+    });
+
+    status_rx
+  }
+}
+
+/// Judgement status of an entire problem.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum Status {
+  CompileErr {
+    message: String,
+  },
+  CompleteOne {
+    subtask_id: usize,
+    record: result::Record,
+  },
+  Finished {
+    score: f32,
+    results: Vec<Vec<result::Record>>,
+  },
+}
+
+impl Status {
+  pub fn from_compile_error(err: result::RuntimeError) -> Self {
+    Self::CompileErr {
+      message: err.to_string(),
     }
-
-    let subtask_results: Vec<_> = coroutines.collect().await;
-
-    let mut sum_score = 0.;
-    for (i, subtask) in self.subtasks.iter().enumerate() {
-      sum_score += subtask.score * *score_rx[i].borrow();
-    }
-
-    return result::JudgeResult::Ok {
-      score: sum_score,
-      results: subtask_results,
-    };
   }
 }

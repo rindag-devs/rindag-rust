@@ -15,7 +15,7 @@ use futures::{
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DurationNanoSeconds};
 use thiserror::Error;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 use crate::{compile, etc, file, generator, judge, result, sandbox, validator};
 
@@ -125,49 +125,72 @@ impl Workflow {
     ));
   }
 
-  pub async fn exec(&self) -> Result<HashMap<String, Arc<sandbox::FileHandle>>, Error> {
-    let (mut global_inf_senders, mut file_receivers, mut ouf_senders, mut inf_receivers) = self
-      .parse()
-      .map_or_else(|e| Err(Error::Parse(e)), |g| Ok(g))?;
+  pub fn exec(self: Arc<Self>) -> mpsc::UnboundedReceiver<Status> {
+    let (result_tx, result_rx) = mpsc::unbounded_channel();
 
-    // Upload files to sandbox.
-    for inf in &self.copy_in {
-      let content = inf.1.as_bytes();
-      let file = Arc::new(sandbox::FileHandle::upload(&content).await);
-      let sender = global_inf_senders.remove(inf.0).unwrap();
-      _ = sender.send(Some(file));
-    }
+    tokio::spawn(async move {
+      let (mut global_inf_senders, mut file_receivers, mut ouf_senders, mut inf_receivers) =
+        match self.parse() {
+          Ok(g) => g,
+          Err(e) => {
+            _ = result_tx.send(Status::Err(Error::Parse(e)));
+            return;
+          }
+        };
 
-    let coroutines = futures::stream::FuturesUnordered::new();
-    for (i, task) in self.tasks.iter().enumerate() {
-      let ir = mem::replace(&mut inf_receivers[i], HashMap::new());
-      let os = mem::replace(&mut ouf_senders[i], HashMap::new());
-      let task = task.clone();
-      coroutines.push(async move {
-        if let Err(e) = task.exec(ir, os).await {
-          return Err(Error::Execute {
-            index: i,
-            source: e,
-          });
-        }
-        return Ok(());
-      });
-    }
-    coroutines.try_collect().await?;
+      // Upload files to sandbox.
+      for inf in &self.copy_in {
+        let content = inf.1.as_bytes();
+        let file = Arc::new(sandbox::FileHandle::upload(&content).await);
+        let sender = global_inf_senders.remove(inf.0).unwrap();
+        _ = sender.send(Some(file));
+      }
 
-    let res = stream::iter(&mut file_receivers)
-      .then(|f| async move {
-        (f.0.to_string(), {
-          f.1.changed().await.unwrap();
-          let x = (*f.1.borrow()).clone();
-          x.unwrap()
+      let coroutines = futures::stream::FuturesUnordered::new();
+      for (i, task) in self.tasks.iter().enumerate() {
+        let ir = mem::replace(&mut inf_receivers[i], HashMap::new());
+        let os = mem::replace(&mut ouf_senders[i], HashMap::new());
+        let task = task.clone();
+        let result_tx = result_tx.clone();
+        coroutines.push(async move {
+          if let Err(e) = task.exec(ir, os).await {
+            return Err(Error::Execute {
+              index: i,
+              source: e,
+            });
+          }
+          _ = result_tx.send(Status::CompleteOne(i));
+          return Ok(());
+        });
+      }
+      if let Err(err) = coroutines.try_collect::<()>().await {
+        _ = result_tx.send(Status::Err(err));
+        return;
+      }
+
+      let res = stream::iter(&mut file_receivers)
+        .then(|f| async move {
+          (f.0.to_string(), {
+            f.1.changed().await.unwrap();
+            let x = (*f.1.borrow()).clone();
+            x.unwrap()
+          })
         })
-      })
-      .collect()
-      .await;
+        .collect()
+        .await;
 
-    return Ok(res);
+      _ = result_tx.send(Status::Finished(res));
+    });
+
+    result_rx
   }
+}
+
+#[derive(Debug, Clone)]
+pub enum Status {
+  Err(Error),
+  CompleteOne(usize),
+  Finished(HashMap<String, Arc<sandbox::FileHandle>>),
 }
 
 #[derive(Debug, Error, Clone)]

@@ -91,7 +91,7 @@ impl Default for Cfg {
         stderr_limit: 16 * 1024,          // 16 kB
       },
       sandbox: SandboxCfg {
-        host: "http://localhost:5051".to_string(),
+        host: "http://[::1]:5051".to_string(),
         max_job: 2,
       },
     };
@@ -103,20 +103,36 @@ impl Default for Cfg {
 pub struct LangCfg {
   name: String,
 
-  pub compile_cmd: Vec<String>,
+  compile_cmd: Vec<String>,
 
-  pub run_cmd: Vec<String>,
+  run_cmd: Vec<String>,
 
   /// Name of source file
-  pub source: String,
+  source: String,
 
   /// Name of executable file
-  pub exec: String,
+  exec: String,
 }
 
 impl LangCfg {
   pub fn name(&self) -> &str {
     return &self.name;
+  }
+
+  pub fn compile_cmd(&self) -> &Vec<String> {
+    return &self.compile_cmd;
+  }
+
+  pub fn run_cmd(&self) -> &Vec<String> {
+    return &self.run_cmd;
+  }
+
+  pub fn source(&self) -> &str {
+    return &self.source;
+  }
+
+  pub fn exec(&self) -> &str {
+    return &self.exec;
   }
 }
 
@@ -138,9 +154,9 @@ impl Borrow<str> for LangCfg {
   }
 }
 
+/// Error when parsing a language name which not in global settings.
 #[derive(Error, Debug, Clone)]
 #[error("invalid lang: {lang}")]
-/// Error when parsing a language name which not in global settings.
 pub struct InvalidLangError {
   pub lang: String,
 }

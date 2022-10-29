@@ -20,10 +20,10 @@ pub async fn generate(
   exec: Arc<sandbox::FileHandle>,
   mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
 ) -> Result<Arc<sandbox::FileHandle>, result::RuntimeError> {
-  copy_in.insert(lang.exec.clone(), exec);
+  copy_in.insert(lang.exec().to_string(), exec);
 
   let res = sandbox::Request::Run(sandbox::Cmd {
-    args: [lang.run_cmd.clone(), args].concat(),
+    args: [lang.run_cmd().clone(), args].concat(),
     copy_in,
     copy_out: vec!["stdout".to_string()],
     ..Default::default()

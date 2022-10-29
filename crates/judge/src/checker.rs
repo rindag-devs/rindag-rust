@@ -113,14 +113,14 @@ pub async fn check(
   ans: Arc<sandbox::FileHandle>,
   mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
 ) -> Result<Output, result::RuntimeError> {
-  copy_in.insert(lang.exec.clone(), exec);
+  copy_in.insert(lang.exec().to_string(), exec);
   copy_in.insert("inf.txt".to_string(), inf);
   copy_in.insert("ouf.txt".to_string(), ouf);
   copy_in.insert("ans.txt".to_string(), ans);
 
   let res = sandbox::Request::Run(sandbox::Cmd {
     args: [
-      lang.run_cmd.clone(),
+      lang.run_cmd().clone(),
       vec![
         "inf.txt".to_string(),
         "ouf.txt".to_string(),

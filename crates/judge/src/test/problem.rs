@@ -1,13 +1,13 @@
-use std::{str::FromStr, time};
+use std::{str::FromStr, sync::Arc, time};
 
-use crate::{builtin, problem, result};
+use crate::{builtin, problem};
 
 #[test]
 fn test_judge_a_plus_b() {
   super::test_rt().block_on(async {
     super::init();
 
-    let problem = problem::Problem {
+    let problem = Arc::new(problem::Problem {
       subtasks: vec![problem::Subtask {
         score: 100.,
         dependences: vec![],
@@ -36,12 +36,11 @@ fn test_judge_a_plus_b() {
       )]
       .into(),
       judge_copy_in: [].into(),
-    };
+    });
 
-    let result = problem
-      .judge(problem::SourceCode {
-        lang: "cpp".to_string(),
-        data: "
+    let mut status_rx = problem.judge(problem::SourceCode {
+      lang: "cpp".to_string(),
+      data: "
       #include<iostream>
       using namespace std;
       signed main(){
@@ -49,17 +48,18 @@ fn test_judge_a_plus_b() {
         cout<<a+b<<'\\n';
       }
       "
-        .as_bytes()
-        .to_vec()
-        .into(),
-      })
-      .await;
+      .as_bytes()
+      .to_vec()
+      .into(),
+    });
 
-    let (score, _) = match result {
-      result::JudgeResult::Ok { score, results } => (score, results),
-      _ => panic!("excepted Ok, found {:?}", result),
-    };
+    let mut final_score = f32::NAN;
+    while let Some(resp) = status_rx.recv().await {
+      if let problem::Status::Finished { score, results: _ } = resp {
+        final_score = score;
+      }
+    }
 
-    assert_eq!(score, 100.);
+    assert_eq!(final_score, 100.);
   });
 }

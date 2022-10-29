@@ -154,24 +154,3 @@ impl Record {
     }
   }
 }
-
-/// Judgement result of an entire problem.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(tag = "type")]
-pub enum JudgeResult {
-  Ok {
-    score: f32,
-    results: Vec<Vec<Record>>,
-  },
-  CompileError {
-    message: String,
-  },
-}
-
-impl JudgeResult {
-  pub fn from_compile_error(err: RuntimeError) -> Self {
-    Self::CompileError {
-      message: err.to_string(),
-    }
-  }
-}

@@ -1,4 +1,4 @@
-use std::{str::FromStr, time};
+use std::{str::FromStr, sync::Arc, time};
 
 use crate::{builtin, file, validator, workflow};
 
@@ -39,7 +39,7 @@ fn test_generate_a_plus_b() {
   }
   ";
 
-    let w = workflow::Workflow {
+    let w = Arc::new(workflow::Workflow {
       copy_in: [
         (
           "generator.cpp".to_string(),
@@ -108,9 +108,15 @@ fn test_generate_a_plus_b() {
         }),
       ],
       copy_out: ["1.in".to_string(), "1.ans".to_string(), "1.log".to_string()].into(),
-    };
+    });
 
-    let res = w.exec().await.unwrap();
+    let mut res = [].into();
+    let mut status_rx = w.clone().exec();
+    while let Some(resp) = status_rx.recv().await {
+      if let workflow::Status::Finished(resp) = resp {
+        res = resp;
+      }
+    }
 
     assert_eq!(
       res["1.in"].to_vec().await.unwrap(),
@@ -153,7 +159,7 @@ fn test_duplicate_file() {
   super::test_rt().block_on(async {
     super::init();
 
-    let w = workflow::Workflow {
+    let w = Arc::new(workflow::Workflow {
       copy_in: [(
         "a.c".to_string(),
         file::File::Memory("a".as_bytes().to_vec()),
@@ -183,20 +189,25 @@ fn test_duplicate_file() {
         }),
       ],
       copy_out: [].into(),
-    };
+    });
 
-    let err = w.exec().await.unwrap_err();
-    if let workflow::Error::Parse(workflow::ParseError::DuplicateFile(err)) = err {
-      assert_eq!(
+    let mut status_rx = w.clone().exec();
+    while let Some(res) = status_rx.recv().await {
+      if let workflow::Status::Err(workflow::Error::Parse(workflow::ParseError::DuplicateFile(
         err,
-        workflow::DuplicateFileError::Prev {
-          index1: 0,
-          index2: 2,
-          name: "b.c".to_string()
-        }
-      )
-    } else {
-      assert!(false);
+      ))) = res
+      {
+        assert_eq!(
+          err,
+          workflow::DuplicateFileError::Prev {
+            index1: 0,
+            index2: 2,
+            name: "b.c".to_string()
+          }
+        )
+      } else {
+        panic!("excepted err");
+      }
     }
   });
 }

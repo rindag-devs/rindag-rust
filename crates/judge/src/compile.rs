@@ -20,12 +20,12 @@ pub async fn compile(
   code: Arc<sandbox::FileHandle>,
   mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
 ) -> Result<Arc<sandbox::FileHandle>, result::RuntimeError> {
-  copy_in.insert(lang.source.clone(), code);
+  copy_in.insert(lang.source().to_string(), code);
 
   let res = sandbox::Request::Run(sandbox::Cmd {
-    args: [lang.compile_cmd.clone(), args].concat(),
+    args: [lang.compile_cmd().clone(), args].concat(),
     copy_in,
-    copy_out: vec![lang.exec.clone()],
+    copy_out: vec![lang.exec().to_string()],
     ..Default::default()
   })
   .exec()
@@ -36,5 +36,5 @@ pub async fn compile(
     return Err(res.result.into());
   }
 
-  return Ok(res.files[&lang.exec].clone());
+  return Ok(res.files[lang.exec()].clone());
 }
