@@ -3,9 +3,9 @@ mod input;
 
 use std::{collections::HashMap, sync::Arc, time};
 
-use futures::{stream, StreamExt};
+use futures::channel::mpsc;
+use futures::{stream, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc;
 
 use crate::{checker, file, program, result, sandbox};
 
@@ -189,7 +189,7 @@ impl Subtask {
         )
       }))
       .then(|f| async {
-        if let Some(tx) = status_tx.clone() {
+        if let Some(mut tx) = status_tx.clone() {
           _ = tx.send(Response::CompleteOne { record: f.clone() });
         }
         f
@@ -199,7 +199,7 @@ impl Subtask {
 
     let score = records.iter().fold(1f32, |a, b| a.min(b.score));
 
-    if let Some(tx) = status_tx.clone() {
+    if let Some(mut tx) = status_tx.clone() {
       _ = tx.send(Response::Finished {
         score,
         records: records.clone(),

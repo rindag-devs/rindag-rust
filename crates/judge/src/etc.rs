@@ -88,7 +88,6 @@ impl Default for Cfg {
       },
       sandbox: SandboxCfg {
         host: "http://[::1]:5051".to_string(),
-        max_job: 2,
       },
     };
   }
@@ -136,9 +135,6 @@ pub struct JudgeCfg {
 pub struct SandboxCfg {
   /// Sandbox gRPC server host address.
   pub host: String,
-
-  /// Max job count running in the same time.
-  pub max_job: usize,
 }
 
 impl Cfg {

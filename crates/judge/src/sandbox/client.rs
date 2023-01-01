@@ -1,8 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use async_once::AsyncOnce;
 use thiserror::Error;
-use tokio::sync::Semaphore;
 
 use crate::{etc, sandbox::proto, CONFIG};
 
@@ -11,9 +10,6 @@ use crate::{etc, sandbox::proto, CONFIG};
 pub struct Client {
   /// The gRPC client.
   client: proto::executor_client::ExecutorClient<tonic::transport::Channel>,
-
-  /// A semaphore to limit for max job count.
-  semaphore: Arc<Semaphore>,
 }
 
 impl Client {
@@ -27,7 +23,6 @@ impl Client {
       client: proto::executor_client::ExecutorClient::connect(conf.host.clone())
         .await
         .unwrap(),
-      semaphore: Arc::new(Semaphore::new(conf.max_job)),
     };
   }
 
@@ -107,11 +102,7 @@ impl Client {
   /// Returns the uuid of request and an oneshot result receiver.
   pub(super) async fn exec(&self, req: proto::Request) -> proto::Response {
     let client = self.client.clone();
-    let permit = self.semaphore.clone().acquire_owned().await.unwrap();
-
     let res = client.clone().exec(req).await.unwrap();
-
-    drop(permit);
     res.get_ref().clone()
   }
 }
