@@ -33,7 +33,7 @@ impl FileHandle {
   }
 
   /// Get content of file as Vec<u8>.
-  pub async fn to_vec(&self) -> Result<Vec<u8>, FileGetError> {
+  pub async fn context(&self) -> Result<Vec<u8>, FileGetError> {
     CLIENT.get().await.file_get(&self.id).await
   }
 }

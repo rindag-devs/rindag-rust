@@ -76,7 +76,7 @@ impl File {
   }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum FileFromStrError {
   #[error("format error: {0}")]
   Format(String),

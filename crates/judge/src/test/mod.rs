@@ -1,10 +1,9 @@
 mod checker;
-mod compile;
 mod generator;
 mod problem;
+mod program;
 mod sandbox;
 mod validator;
-mod workflow;
 
 #[cfg(test)]
 fn init() {

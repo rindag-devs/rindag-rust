@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::{etc, result, sandbox};
+use crate::{program, result, sandbox};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct VariableBounds {
@@ -51,52 +51,66 @@ impl Overview {
   }
 }
 
-/// Run the validator and returns the overview log file.
-///
-/// It will do these following:
-///
-/// 1. Constructs a sandbox request according to the validator language.
-/// 2. Execute this request with sandbox.
-/// 3. Check if there's an error happens, or return the parsed overview log.
-///
-/// # Errors
-///
-/// This function will return an error if validating abnormally
-/// (e.g. validating time limit exceed or signaled)
-/// or a sandbox internal error was encountered.
-pub async fn validate(
-  lang: &etc::LangCfg,
-  args: Vec<String>,
-  exec: Arc<sandbox::FileHandle>,
-  inf: Arc<sandbox::FileHandle>,
-  mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
-) -> Result<Overview, result::RuntimeError> {
-  copy_in.insert(lang.exec().to_string(), exec);
+#[derive(Debug, Clone)]
+pub struct Validator {
+  pub exec: program::Executable,
+}
 
-  let res = sandbox::Request::Run(sandbox::Cmd {
-    args: [
-      lang.run_cmd().clone(),
-      args,
-      [
-        "--testOverviewLogFileName".to_string(),
-        "val.log".to_string(),
+impl From<program::Executable> for Validator {
+  fn from(exec: program::Executable) -> Self {
+    Self { exec }
+  }
+}
+
+impl Validator {
+  /// Run the validator and returns the overview log file.
+  ///
+  /// It will do these following:
+  ///
+  /// 1. Constructs a sandbox request according to the validator language.
+  /// 2. Execute this request with sandbox.
+  /// 3. Check if there's an error happens, or return the parsed overview log.
+  ///
+  /// # Errors
+  ///
+  /// This function will return an error if validating abnormally
+  /// (e.g. validating time limit exceed or signaled)
+  /// or a sandbox internal error was encountered.
+  pub async fn validate(
+    &self,
+    args: Vec<String>,
+    input_file: Arc<sandbox::FileHandle>,
+    mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+  ) -> Result<Overview, result::RuntimeError> {
+    copy_in.insert(self.exec.lang.exec().to_string(), self.exec.file.clone());
+
+    let mut res = sandbox::Request::Run(sandbox::Cmd {
+      args: [
+        self.exec.lang.run_cmd().clone(),
+        args,
+        [
+          "--testOverviewLogFileName".to_string(),
+          "val.log".to_string(),
+        ]
+        .to_vec(),
       ]
-      .to_vec(),
-    ]
-    .concat(),
-    stdin: Some(inf),
-    copy_in,
-    copy_out: vec!["stderr".to_string(), "val.log".to_string()],
-    ..Default::default()
-  })
-  .exec()
-  .await[0]
-    .clone();
+      .concat(),
+      stdin: Some(input_file),
+      copy_in,
+      copy_out: vec!["stderr".to_string(), "val.log".to_string()],
+      ..Default::default()
+    })
+    .exec()
+    .await;
 
-  match res.result.status {
-    sandbox::Status::Accepted => Ok(Overview::parse(&String::from_utf8_lossy(
-      &res.files["val.log"].clone().to_vec().await.unwrap(),
-    ))),
-    _ => Err(res.result.into()),
+    assert_eq!(res.len(), 1);
+    let res = res.pop().unwrap();
+
+    match res.result.status {
+      sandbox::Status::Accepted => Ok(Overview::parse(&String::from_utf8_lossy(
+        &res.files["val.log"].clone().context().await.unwrap(),
+      ))),
+      _ => Err(res.result.into()),
+    }
   }
 }

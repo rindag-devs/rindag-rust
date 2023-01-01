@@ -1,18 +1,16 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use crate::{builtin, compile, etc, generator, sandbox};
+use crate::{builtin, file, generator, lang, program, sandbox};
 
 #[test]
 fn test_simple() {
   super::test_rt().block_on(async {
     super::init();
 
-    let exec_file = compile::compile(
-      &etc::LangCfg::from_str("cpp").unwrap(),
-      vec![],
-      Arc::new(
-        sandbox::FileHandle::upload(
-          "
+    let src = program::Source {
+      lang: lang::Lang::from_str("cpp").unwrap(),
+      data: file::File::Memory(
+        "
         #include\"testlib.h\"
         #include<iostream>
         signed main(signed argc,char**argv){
@@ -21,38 +19,40 @@ fn test_simple() {
           std::cout<<n<<'\\n';
         }
         "
-          .as_bytes(),
-        )
-        .await,
+        .as_bytes()
+        .to_vec(),
       ),
-      [(
-        "testlib.h".to_string(),
-        Arc::new(
-          sandbox::FileHandle::upload(
-            &builtin::File::from_str("testlib:testlib.h")
-              .unwrap()
-              .as_bytes(),
-          )
-          .await,
-        ),
-      )]
-      .into(),
-    )
-    .await
-    .unwrap();
+    };
+
+    let gen = generator::Generator::from(
+      src
+        .compile(
+          vec![],
+          [(
+            "testlib.h".to_string(),
+            Arc::new(
+              sandbox::FileHandle::upload(
+                &builtin::File::from_str("testlib:testlib.h")
+                  .unwrap()
+                  .as_bytes(),
+              )
+              .await,
+            ),
+          )]
+          .into(),
+        )
+        .await
+        .unwrap(),
+    );
 
     assert_eq!(
-      generator::generate(
-        &etc::LangCfg::from_str("cpp").unwrap(),
-        vec!["-n".to_string(), "100".to_string()],
-        exec_file,
-        HashMap::new(),
-      )
-      .await
-      .unwrap()
-      .to_vec()
-      .await
-      .unwrap(),
+      gen
+        .generate(vec!["-n".to_string(), "100".to_string()], HashMap::new(),)
+        .await
+        .unwrap()
+        .context()
+        .await
+        .unwrap(),
       "100\n".as_bytes()
     );
   });

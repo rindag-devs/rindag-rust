@@ -20,8 +20,8 @@ pub fn limit_message(s: &str) -> String {
 /// Error when task does not executed normally (result != Accepted).
 #[derive(Debug, Error, Clone)]
 #[error(
-    "task executed failed (status: {0}, time: {1:?}, memory: {2} bytes)",
-    result.status,result.time,result.memory,
+    "task executed failed (status: {0}, time: {1:?}, memory: {2} bytes, exit code: {3})",
+    result.status, result.time, result.memory, result.exit_code
   )]
 pub struct RuntimeError {
   pub result: sandbox::ExecuteResult,
@@ -121,36 +121,39 @@ lazy_static! {
 }
 
 impl Record {
-  /// Combine a JudgeResult and a checker::Output into a Record.
-  pub fn new(result: sandbox::ExecuteResult, checker_output: Option<checker::Output>) -> Self {
-    if checker_output.is_none() {
-      if result.status != sandbox::Status::Accepted {
-        return Self {
-          status: RecordStatus::SystemError,
-          time: result.time,
-          memory: result.memory,
-          exit_code: result.exit_code,
-          score: 0.,
-          message: "error: no checker".to_string(),
-        };
-      }
-      return Self {
-        status: result.status.clone().into(),
-        time: result.time,
-        memory: result.memory,
-        exit_code: result.exit_code,
-        score: 0.,
-        message: RuntimeError::from(result).to_string(),
-      };
-    }
-    let checker_output = checker_output.unwrap();
+  /// Create a new system error record.
+  pub fn new_system_error(message: &str) -> Self {
     Self {
-      status: checker_output.status.into(),
+      status: RecordStatus::SystemError,
+      time: time::Duration::ZERO,
+      memory: 0,
+      exit_code: -1,
+      score: 0.,
+      message: message.to_string(),
+    }
+  }
+
+  /// Creates a Record from an ExecuteResult that was interrupted (not exited normally).
+  pub fn new_interrupted(result: &sandbox::ExecuteResult) -> Self {
+    Self {
+      status: result.status.clone().into(),
+      time: result.time,
+      memory: result.memory,
+      exit_code: result.exit_code,
+      score: 0.,
+      message: RuntimeError::from(result.clone()).to_string(),
+    }
+  }
+
+  /// Combine a JudgeResult and a checker::Output into a Record.
+  pub fn new_checked(result: &sandbox::ExecuteResult, checker_output: &checker::Output) -> Self {
+    Self {
+      status: checker_output.status.clone().into(),
       time: result.time,
       memory: result.memory,
       exit_code: result.exit_code,
       score: checker_output.score,
-      message: checker_output.message,
+      message: checker_output.message.clone(),
     }
   }
 }

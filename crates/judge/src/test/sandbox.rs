@@ -43,7 +43,7 @@ fn test_hello_world() {
 
     assert_eq!(run_res.result.status, sandbox::Status::Accepted);
     assert_eq!(
-      run_res.files["stdout"].to_vec().await.unwrap(),
+      run_res.files["stdout"].context().await.unwrap(),
       "hello, world!\n你好, 世界!\n".as_bytes().to_vec()
     );
   });

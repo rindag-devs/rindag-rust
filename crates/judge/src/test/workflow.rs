@@ -56,18 +56,19 @@ fn test_generate_a_plus_b() {
         ),
       ]
       .into(),
+      copy_out: ["1.in".to_string(), "1.ans".to_string(), "1.log".to_string()].into(),
       tasks: vec![
-        Box::new(workflow::JudgeBatchCmd {
+        Box::new(workflow::ExecTask {
           lang: "cpp".to_string(),
           args: vec![],
           exec: "std".to_string(),
-          inf: "1.in".to_string(),
+          stdin: "1.in".to_string(),
           copy_in: [].into(),
           copy_out: "1.ans".to_string(),
           time_limit: time::Duration::from_secs(1),
           memory_limit: 64 * 1024 * 1024,
         }),
-        Box::new(workflow::GenerateCmd {
+        Box::new(workflow::GenerateTask {
           lang: "cpp".to_string(),
           args: ["--test", "main", "--group", "1", "-a", "1", "-b", "100"]
             .iter()
@@ -77,7 +78,7 @@ fn test_generate_a_plus_b() {
           copy_in: [].into(),
           generated: "1.in".to_string(),
         }),
-        Box::new(workflow::ValidateCmd {
+        Box::new(workflow::ValidateTask {
           lang: "cpp".to_string(),
           args: vec![],
           exec: "validator".to_string(),
@@ -85,21 +86,21 @@ fn test_generate_a_plus_b() {
           copy_in: [].into(),
           report: "1.log".to_string(),
         }),
-        Box::new(workflow::CompileCmd {
+        Box::new(workflow::CompileTask {
           lang: "cpp".to_string(),
           args: vec![],
           code: "generator.cpp".to_string(),
           copy_in: [("testlib.h".to_string(), "testlib.h".to_string())].into(),
           exec: "generator".to_string(),
         }),
-        Box::new(workflow::CompileCmd {
+        Box::new(workflow::CompileTask {
           lang: "cpp".to_string(),
           args: vec![],
           code: "std.cpp".to_string(),
           copy_in: [].into(),
           exec: "std".to_string(),
         }),
-        Box::new(workflow::CompileCmd {
+        Box::new(workflow::CompileTask {
           lang: "cpp".to_string(),
           args: vec![],
           code: "validator.cpp".to_string(),
@@ -107,13 +108,12 @@ fn test_generate_a_plus_b() {
           exec: "validator".to_string(),
         }),
       ],
-      copy_out: ["1.in".to_string(), "1.ans".to_string(), "1.log".to_string()].into(),
     });
 
     let mut res = [].into();
     let mut status_rx = w.clone().exec();
     while let Some(resp) = status_rx.recv().await {
-      if let workflow::Status::Finished(resp) = resp {
+      if let workflow::Response::Finished(resp) = resp {
         res = resp;
       }
     }
@@ -127,7 +127,7 @@ fn test_generate_a_plus_b() {
       "101\n".as_bytes().to_vec()
     );
     let val_log: validator::Overview =
-      rmp_serde::from_slice(&res["1.log"].to_vec().await.unwrap()).unwrap();
+      serde_json::from_slice(&res["1.log"].to_vec().await.unwrap()).unwrap();
     assert_eq!(
       val_log,
       validator::Overview {
@@ -165,22 +165,23 @@ fn test_duplicate_file() {
         file::File::Memory("a".as_bytes().to_vec()),
       )]
       .into(),
+      copy_out: [].into(),
       tasks: vec![
-        Box::new(workflow::CompileCmd {
+        Box::new(workflow::CompileTask {
           lang: "c".to_string(),
           args: vec![],
           code: "a.c".to_string(),
           copy_in: [].into(),
           exec: "b.c".to_string(),
         }),
-        Box::new(workflow::CompileCmd {
+        Box::new(workflow::CompileTask {
           lang: "c".to_string(),
           args: vec![],
           code: "b.c".to_string(),
           copy_in: [].into(),
           exec: "c.c".to_string(),
         }),
-        Box::new(workflow::CompileCmd {
+        Box::new(workflow::CompileTask {
           lang: "c".to_string(),
           args: vec![],
           code: "c.c".to_string(),
@@ -188,12 +189,11 @@ fn test_duplicate_file() {
           exec: "b.c".to_string(),
         }),
       ],
-      copy_out: [].into(),
     });
 
     let mut status_rx = w.clone().exec();
     while let Some(res) = status_rx.recv().await {
-      if let workflow::Status::Err(workflow::Error::Parse(workflow::ParseError::DuplicateFile(
+      if let workflow::Response::Err(workflow::Error::Parse(workflow::ParseError::DuplicateFile(
         err,
       ))) = res
       {

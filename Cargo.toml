@@ -3,7 +3,7 @@ members = ["crates/*"]
 
 [package]
 name = "rindag"
-version = "0.1.0-dev"
+version = "0.1.0"
 description = """
 rindag is a online judge system dedicated to creating programming competition problems.
 """

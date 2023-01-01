@@ -1,18 +1,16 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use crate::{builtin, compile, etc, sandbox, validator};
+use crate::{builtin, file, lang, program, sandbox, validator};
 
 #[test]
 fn test_val_a_plus_b() {
   super::test_rt().block_on(async {
     super::init();
 
-    let exec_file = compile::compile(
-      &etc::LangCfg::from_str("cpp").unwrap(),
-      vec![],
-      Arc::new(
-        sandbox::FileHandle::upload(
-          "
+    let src = program::Source {
+      lang: lang::Lang::from_str("cpp").unwrap(),
+      data: file::File::Memory(
+        "
         #include\"testlib.h\"
         signed main(signed argc,char**argv){
           registerValidation(argc,argv);
@@ -29,36 +27,41 @@ fn test_val_a_plus_b() {
           if(a+b==0)feature(\"sum_0\");
         }
         "
-          .as_bytes(),
-        )
-        .await,
+        .as_bytes()
+        .to_vec(),
       ),
-      [(
-        "testlib.h".to_string(),
-        Arc::new(
-          sandbox::FileHandle::upload(
-            &builtin::File::from_str("testlib:testlib.h")
-              .unwrap()
-              .as_bytes(),
-          )
-          .await,
-        ),
-      )]
-      .into(),
-    )
-    .await
-    .unwrap();
+    };
+
+    let val = validator::Validator::from(
+      src
+        .compile(
+          vec![],
+          [(
+            "testlib.h".to_string(),
+            Arc::new(
+              sandbox::FileHandle::upload(
+                &builtin::File::from_str("testlib:testlib.h")
+                  .unwrap()
+                  .as_bytes(),
+              )
+              .await,
+            ),
+          )]
+          .into(),
+        )
+        .await
+        .unwrap(),
+    );
 
     assert_eq!(
-      validator::validate(
-        &etc::LangCfg::from_str("cpp").unwrap(),
-        vec!["--group".to_string(), "even_a_and_b".to_string()],
-        exec_file.clone(),
-        Arc::new(sandbox::FileHandle::upload("0 -10\n".as_bytes()).await),
-        HashMap::new(),
-      )
-      .await
-      .unwrap(),
+      val
+        .validate(
+          vec!["--group".to_string(), "even_a_and_b".to_string()],
+          Arc::new(sandbox::FileHandle::upload("0 -10\n".as_bytes()).await),
+          HashMap::new(),
+        )
+        .await
+        .unwrap(),
       validator::Overview {
         variables: [
           (
@@ -82,15 +85,14 @@ fn test_val_a_plus_b() {
     );
 
     assert_eq!(
-      validator::validate(
-        &etc::LangCfg::from_str("cpp").unwrap(),
-        vec![],
-        exec_file.clone(),
-        Arc::new(sandbox::FileHandle::upload("-100 100\n".as_bytes()).await),
-        HashMap::new(),
-      )
-      .await
-      .unwrap(),
+      val
+        .validate(
+          vec![],
+          Arc::new(sandbox::FileHandle::upload("-100 100\n".as_bytes()).await),
+          HashMap::new(),
+        )
+        .await
+        .unwrap(),
       validator::Overview {
         variables: [
           (
@@ -113,24 +115,22 @@ fn test_val_a_plus_b() {
       }
     );
 
-    assert!(validator::validate(
-      &etc::LangCfg::from_str("cpp").unwrap(),
-      vec![],
-      exec_file.clone(),
-      Arc::new(sandbox::FileHandle::upload("-100 101\n".as_bytes()).await),
-      HashMap::new(),
-    )
-    .await
-    .is_err());
+    assert!(val
+      .validate(
+        vec![],
+        Arc::new(sandbox::FileHandle::upload("-100 101\n".as_bytes()).await),
+        HashMap::new(),
+      )
+      .await
+      .is_err());
 
-    assert!(validator::validate(
-      &etc::LangCfg::from_str("cpp").unwrap(),
-      vec!["--group".to_string(), "even_a_and_b".to_string()],
-      exec_file.clone(),
-      Arc::new(sandbox::FileHandle::upload("1 2\n".as_bytes()).await),
-      HashMap::new(),
-    )
-    .await
-    .is_err());
+    assert!(val
+      .validate(
+        vec!["--group".to_string(), "even_a_and_b".to_string()],
+        Arc::new(sandbox::FileHandle::upload("1 2\n".as_bytes()).await),
+        HashMap::new(),
+      )
+      .await
+      .is_err());
   });
 }

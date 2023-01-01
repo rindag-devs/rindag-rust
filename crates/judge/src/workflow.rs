@@ -17,16 +17,16 @@ use serde_with::{serde_as, DurationNanoSeconds};
 use thiserror::Error;
 use tokio::sync::{mpsc, watch};
 
-use crate::{compile, etc, file, generator, judge, result, sandbox, validator};
+use crate::{file, generator, judge, lang, program, result, sandbox, validator};
 
 /// A workflow to a set of tasks (like build a problem or do a stress).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Workflow {
   pub copy_in: HashMap<String, file::File>,
 
-  pub tasks: Vec<Box<dyn Cmd>>,
-
   pub copy_out: HashSet<String>,
+
+  pub tasks: Vec<Box<dyn Task>>,
 }
 
 type FileSender = watch::Sender<Option<Arc<sandbox::FileHandle>>>;
@@ -125,7 +125,7 @@ impl Workflow {
     ));
   }
 
-  pub fn exec(self: Arc<Self>) -> mpsc::UnboundedReceiver<Status> {
+  pub fn exec(self: Arc<Self>) -> mpsc::UnboundedReceiver<Response> {
     let (result_tx, result_rx) = mpsc::unbounded_channel();
 
     tokio::spawn(async move {
@@ -133,7 +133,7 @@ impl Workflow {
         match self.parse() {
           Ok(g) => g,
           Err(e) => {
-            _ = result_tx.send(Status::Err(Error::Parse(e)));
+            _ = result_tx.send(Response::Err(Error::Parse(e)));
             return;
           }
         };
@@ -159,12 +159,12 @@ impl Workflow {
               source: e,
             });
           }
-          _ = result_tx.send(Status::CompleteOne(i));
+          _ = result_tx.send(Response::CompleteOne(i));
           return Ok(());
         });
       }
       if let Err(err) = coroutines.try_collect::<()>().await {
-        _ = result_tx.send(Status::Err(err));
+        _ = result_tx.send(Response::Err(err));
         return;
       }
 
@@ -179,7 +179,7 @@ impl Workflow {
         .collect()
         .await;
 
-      _ = result_tx.send(Status::Finished(res));
+      _ = result_tx.send(Response::Finished(res));
     });
 
     result_rx
@@ -187,7 +187,7 @@ impl Workflow {
 }
 
 #[derive(Debug, Clone)]
-pub enum Status {
+pub enum Response {
   Err(Error),
   CompleteOne(usize),
   Finished(HashMap<String, Arc<sandbox::FileHandle>>),
@@ -232,25 +232,25 @@ pub enum DuplicateFileError {
   },
 }
 
-/// Errors when command execute.
+/// Errors when task execute.
 #[derive(Debug, Error, Clone)]
 pub enum ExecuteError {
   #[error("invalid lang")]
-  InvalidLang(#[from] etc::InvalidLangError),
+  InvalidLang(#[from] lang::InvalidLangError),
   #[error("runtime error")]
   Runtime(#[from] result::RuntimeError),
 }
 
 #[async_trait]
 #[typetag::serde(tag = "type")]
-pub trait Cmd: std::fmt::Debug + Sync + Send {
-  /// Get all copy in files of the command.
+pub trait Task: std::fmt::Debug + Sync + Send {
+  /// Get all copy in files of the task.
   fn get_copy_in(&self) -> HashSet<String>;
 
-  /// Get all copy in files of the command.
+  /// Get all copy in files of the task.
   fn get_copy_out(&self) -> HashSet<String>;
 
-  /// Execute the command.
+  /// Execute the task.
   async fn exec(
     &self,
     copy_in_receivers: HashMap<String, FileReceiver>,
@@ -259,7 +259,7 @@ pub trait Cmd: std::fmt::Debug + Sync + Send {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CompileCmd {
+pub struct CompileTask {
   pub lang: String,
   pub args: Vec<String>,
   pub code: String,
@@ -271,7 +271,7 @@ pub struct CompileCmd {
 
 #[async_trait]
 #[typetag::serde(name = "compile")]
-impl Cmd for CompileCmd {
+impl Task for CompileTask {
   fn get_copy_in(&self) -> HashSet<String> {
     let mut res: HashSet<String> = self.copy_in.keys().cloned().collect();
     res.insert(self.code.clone());
@@ -287,8 +287,8 @@ impl Cmd for CompileCmd {
     mut copy_in_receivers: HashMap<String, FileReceiver>,
     mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
-    let lang = etc::LangCfg::from_str(&self.lang).map_or(
-      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+    let lang = lang::Lang::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(lang::InvalidLangError {
         lang: self.lang.clone(),
       })),
       |x| Ok(x),
@@ -315,7 +315,7 @@ impl Cmd for CompileCmd {
 
     log::debug!("compile for {} start", &self.exec);
 
-    let res = compile::compile(&lang, self.args.clone(), code, copy_in).await?;
+    let res = program::compile(&lang, self.args.clone(), code, copy_in).await?;
     _ = copy_out_senders.remove(&self.exec).unwrap().send(Some(res));
 
     log::debug!("compile for {} finished", &self.exec);
@@ -325,7 +325,7 @@ impl Cmd for CompileCmd {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct GenerateCmd {
+pub struct GenerateTask {
   pub lang: String,
   pub args: Vec<String>,
   pub exec: String,
@@ -337,7 +337,7 @@ pub struct GenerateCmd {
 
 #[async_trait]
 #[typetag::serde(name = "generate")]
-impl Cmd for GenerateCmd {
+impl Task for GenerateTask {
   fn get_copy_in(&self) -> HashSet<String> {
     let mut res: HashSet<String> = self.copy_in.keys().cloned().collect();
     res.insert(self.exec.clone());
@@ -353,8 +353,8 @@ impl Cmd for GenerateCmd {
     mut copy_in_receivers: HashMap<String, FileReceiver>,
     mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
-    let lang = etc::LangCfg::from_str(&self.lang).map_or(
-      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+    let lang = lang::Lang::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(lang::InvalidLangError {
         lang: self.lang.clone(),
       })),
       |x| Ok(x),
@@ -390,8 +390,8 @@ impl Cmd for GenerateCmd {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-/// Command to run a validator.
-pub struct ValidateCmd {
+/// Task to run a validator.
+pub struct ValidateTask {
   /// Language of validator.
   pub lang: String,
 
@@ -413,7 +413,7 @@ pub struct ValidateCmd {
 
 #[async_trait]
 #[typetag::serde(name = "validate")]
-impl Cmd for ValidateCmd {
+impl Task for ValidateTask {
   fn get_copy_in(&self) -> HashSet<String> {
     let mut res: HashSet<String> = self.copy_in.keys().cloned().collect();
     res.insert(self.exec.clone());
@@ -430,8 +430,8 @@ impl Cmd for ValidateCmd {
     mut copy_in_receivers: HashMap<String, FileReceiver>,
     mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
-    let lang = etc::LangCfg::from_str(&self.lang).map_or(
-      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+    let lang = lang::Lang::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(lang::InvalidLangError {
         lang: self.lang.clone(),
       })),
       |x| Ok(x),
@@ -465,7 +465,7 @@ impl Cmd for ValidateCmd {
     let overview = validator::validate(&lang, self.args.clone(), exec, inf, copy_in).await?;
 
     let report_file =
-      Arc::new(sandbox::FileHandle::upload(&rmp_serde::to_vec(&overview).unwrap()).await);
+      Arc::new(sandbox::FileHandle::upload(&serde_json::to_vec(&overview).unwrap()).await);
 
     _ = copy_out_senders
       .remove(&self.report)
@@ -476,13 +476,14 @@ impl Cmd for ValidateCmd {
   }
 }
 
+/// A task to execute a command in sandbox.
 #[serde_as]
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct JudgeBatchCmd {
+pub struct ExecTask {
   pub lang: String,
   pub args: Vec<String>,
   pub exec: String,
-  pub inf: String,
+  pub stdin: String,
   pub copy_in: HashMap<String, String>,
   pub copy_out: String,
   #[serde_as(as = "DurationNanoSeconds<u64>")]
@@ -492,11 +493,11 @@ pub struct JudgeBatchCmd {
 
 #[async_trait]
 #[typetag::serde(name = "judge_batch")]
-impl Cmd for JudgeBatchCmd {
+impl Task for ExecTask {
   fn get_copy_in(&self) -> HashSet<String> {
     let mut res: HashSet<String> = self.copy_in.keys().cloned().collect();
     res.insert(self.exec.clone());
-    res.insert(self.inf.clone());
+    res.insert(self.stdin.clone());
     return res;
   }
 
@@ -509,8 +510,8 @@ impl Cmd for JudgeBatchCmd {
     mut copy_in_receivers: HashMap<String, FileReceiver>,
     mut copy_out_senders: HashMap<String, FileSender>,
   ) -> Result<(), ExecuteError> {
-    let lang = etc::LangCfg::from_str(&self.lang).map_or(
-      Err(ExecuteError::InvalidLang(etc::InvalidLangError {
+    let lang = lang::Lang::from_str(&self.lang).map_or(
+      Err(ExecuteError::InvalidLang(lang::InvalidLangError {
         lang: self.lang.clone(),
       })),
       |x| Ok(x),
@@ -522,7 +523,7 @@ impl Cmd for JudgeBatchCmd {
       x.unwrap()
     };
     let inf = {
-      let mut rx = copy_in_receivers.remove(&self.inf).unwrap();
+      let mut rx = copy_in_receivers.remove(&self.stdin).unwrap();
       rx.changed().await.unwrap();
       let x = (*rx.borrow()).clone();
       x.unwrap()

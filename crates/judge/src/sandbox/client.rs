@@ -56,7 +56,7 @@ impl Client {
   }
 
   /// Prepare a file in the sandbox, returns file id (can be referenced in `run` parameter).
-  pub async fn file_add(&self, content: &[u8]) -> String {
+  pub(super) async fn file_add(&self, content: &[u8]) -> String {
     self
       .client
       .clone()

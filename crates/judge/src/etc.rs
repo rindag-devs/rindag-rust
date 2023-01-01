@@ -1,13 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-  borrow::Borrow,
-  collections::HashSet,
-  fmt::Display,
-  hash::{Hash, Hasher},
-  str::FromStr,
-  time,
-};
-use thiserror::Error;
+use std::{collections::HashMap, time};
 
 use crate::ARGS;
 
@@ -25,7 +17,7 @@ pub struct Cfg {
   /// WARNING: Be sure to set a token secret in a production environment.
   pub secret: Option<String>,
 
-  pub lang: HashSet<LangCfg>,
+  pub lang: HashMap<String, LangCfg>,
 
   pub judge: JudgeCfg,
 
@@ -38,45 +30,49 @@ impl Default for Cfg {
     return Self {
       host: ":8080".to_string(),
       secret: None,
-      lang: HashSet::from([
-        LangCfg {
-          name: "c".to_string(),
-          compile_cmd: [
-            "/usr/bin/gcc",
-            "foo.c",
-            "-o",
-            "foo",
-            "-O2",
-            "-w",
-            "-fmax-errors=3",
-            "-DONLINE_JUDGE",
-          ]
-          .iter()
-          .map(|&s| s.into())
-          .collect(),
-          run_cmd: vec!["foo".to_string()],
-          source: "foo.c".to_string(),
-          exec: "foo".to_string(),
-        },
-        LangCfg {
-          name: "cpp".to_string(),
-          compile_cmd: [
-            "/usr/bin/g++",
-            "foo.cpp",
-            "-o",
-            "foo",
-            "-O2",
-            "-w",
-            "-fmax-errors=3",
-            "-DONLINE_JUDGE",
-          ]
-          .iter()
-          .map(|&s| s.into())
-          .collect(),
-          run_cmd: vec!["foo".to_string()],
-          source: "foo.cpp".to_string(),
-          exec: "foo".to_string(),
-        },
+      lang: HashMap::from([
+        (
+          "c".to_string(),
+          LangCfg {
+            compile_cmd: [
+              "/usr/bin/gcc",
+              "foo.c",
+              "-o",
+              "foo",
+              "-O2",
+              "-w",
+              "-fmax-errors=3",
+              "-DONLINE_JUDGE",
+            ]
+            .iter()
+            .map(|&s| s.into())
+            .collect(),
+            run_cmd: vec!["foo".to_string()],
+            source: "foo.c".to_string(),
+            exec: "foo".to_string(),
+          },
+        ),
+        (
+          "cpp".to_string(),
+          LangCfg {
+            compile_cmd: [
+              "/usr/bin/g++",
+              "foo.cpp",
+              "-o",
+              "foo",
+              "-O2",
+              "-w",
+              "-fmax-errors=3",
+              "-DONLINE_JUDGE",
+            ]
+            .iter()
+            .map(|&s| s.into())
+            .collect(),
+            run_cmd: vec!["foo".to_string()],
+            source: "foo.cpp".to_string(),
+            exec: "foo".to_string(),
+          },
+        ),
       ]),
       judge: JudgeCfg {
         env: vec![
@@ -99,85 +95,17 @@ impl Default for Cfg {
 }
 
 /// Programming language config.
-#[derive(Debug, Serialize, Deserialize, Clone, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LangCfg {
-  name: String,
+  pub compile_cmd: Vec<String>,
 
-  compile_cmd: Vec<String>,
-
-  run_cmd: Vec<String>,
+  pub run_cmd: Vec<String>,
 
   /// Name of source file
-  source: String,
+  pub source: String,
 
   /// Name of executable file
-  exec: String,
-}
-
-impl LangCfg {
-  pub fn name(&self) -> &str {
-    return &self.name;
-  }
-
-  pub fn compile_cmd(&self) -> &Vec<String> {
-    return &self.compile_cmd;
-  }
-
-  pub fn run_cmd(&self) -> &Vec<String> {
-    return &self.run_cmd;
-  }
-
-  pub fn source(&self) -> &str {
-    return &self.source;
-  }
-
-  pub fn exec(&self) -> &str {
-    return &self.exec;
-  }
-}
-
-impl PartialEq for LangCfg {
-  fn eq(&self, other: &LangCfg) -> bool {
-    self.name == other.name
-  }
-}
-
-impl Hash for LangCfg {
-  fn hash<H: Hasher>(&self, state: &mut H) {
-    self.name.hash(state);
-  }
-}
-
-impl Borrow<str> for LangCfg {
-  fn borrow(&self) -> &str {
-    &self.name
-  }
-}
-
-/// Error when parsing a language name which not in global settings.
-#[derive(Error, Debug, Clone)]
-#[error("invalid lang: {lang}")]
-pub struct InvalidLangError {
-  pub lang: String,
-}
-
-impl FromStr for LangCfg {
-  type Err = InvalidLangError;
-
-  fn from_str(s: &str) -> Result<Self, Self::Err> {
-    match CONFIG.lang.get(s) {
-      Some(x) => Ok(x.clone()),
-      None => Err(Self::Err {
-        lang: s.to_string(),
-      }),
-    }
-  }
-}
-
-impl Display for LangCfg {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", &self.name)
-  }
+  pub exec: String,
 }
 
 /// Judge config.
