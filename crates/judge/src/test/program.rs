@@ -4,9 +4,7 @@ use crate::{file, lang, program, sandbox};
 
 #[test]
 fn test_ce() {
-  super::test_rt().block_on(async {
-    super::init();
-
+  super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("c").unwrap(),
       data: file::File::Memory("ERROR".as_bytes().to_vec()),
@@ -20,9 +18,7 @@ fn test_ce() {
 
 #[test]
 fn test_ok() {
-  super::test_rt().block_on(async {
-    super::init();
-
+  super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("c").unwrap(),
       data: file::File::Memory(

@@ -5,9 +5,7 @@ use crate::sandbox;
 /// A test for sandbox compiling and running a C code with gcc.
 #[test]
 fn test_hello_world() {
-  super::test_rt().block_on(async {
-    super::init();
-
+  super::async_test(async {
     let compile_res = sandbox::Request::Run(sandbox::Cmd {
       args: vec!["/usr/bin/gcc".to_string(), "a.c".to_string()],
       copy_in: [(

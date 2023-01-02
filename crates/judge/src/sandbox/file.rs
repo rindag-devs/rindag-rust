@@ -12,11 +12,8 @@ pub struct FileHandle {
 impl Drop for FileHandle {
   fn drop(&mut self) {
     log::debug!("dropped file {}", &self.id);
-    tokio::task::block_in_place(|| {
-      let handle = tokio::runtime::Handle::current();
-      let client = handle.block_on(CLIENT.get());
-      handle.block_on(client.file_delete(&self.id));
-    });
+    let id = self.id.clone();
+    tokio::spawn(async move { CLIENT.get().await.file_delete(&id).await });
   }
 }
 

@@ -4,9 +4,7 @@ use crate::{builtin, file, generator, lang, problem, program, result, sandbox};
 
 #[test]
 fn test_judge_a_plus_b() {
-  super::test_rt().block_on(async {
-    super::init();
-
+  super::async_test(async {
     let sol_c = program::Source {
       lang: lang::Lang::from_str("c").unwrap(),
       data: file::File::Memory(

@@ -4,9 +4,7 @@ use crate::{builtin, file, lang, program, sandbox, validator};
 
 #[test]
 fn test_val_a_plus_b() {
-  super::test_rt().block_on(async {
-    super::init();
-
+  super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("cpp").unwrap(),
       data: file::File::Memory(

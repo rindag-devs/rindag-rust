@@ -4,9 +4,7 @@ use crate::{builtin, file, generator, lang, program, sandbox};
 
 #[test]
 fn test_simple() {
-  super::test_rt().block_on(async {
-    super::init();
-
+  super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("cpp").unwrap(),
       data: file::File::Memory(
