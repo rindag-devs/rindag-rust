@@ -2,36 +2,8 @@ use std::time;
 
 use serde::{Deserialize, Serialize};
 use strum::Display;
-use thiserror::Error;
 
-use crate::{checker, sandbox};
-
-/// Limit the message to a maximum of 'LIMIT' characters.
-pub fn limit_message(s: &str) -> String {
-  const LIMIT: usize = 1024;
-  if s.as_bytes().len() <= LIMIT {
-    return s.to_string();
-  }
-  return String::from_utf8_lossy(&s.bytes().into_iter().take(LIMIT - 3).collect::<Vec<_>>())
-    .to_string()
-    + "...";
-}
-
-/// Error when task does not executed normally (result != Accepted).
-#[derive(Debug, Error, Clone)]
-#[error(
-    "task executed failed (status: {0}, time: {1:?}, memory: {2} bytes, exit code: {3})",
-    result.status, result.time, result.memory, result.exit_code
-  )]
-pub struct RuntimeError {
-  pub result: sandbox::ExecuteResult,
-}
-
-impl From<sandbox::ExecuteResult> for RuntimeError {
-  fn from(res: sandbox::ExecuteResult) -> Self {
-    Self { result: res }
-  }
-}
+use crate::{checker, error, sandbox};
 
 /// Judge result status for a program.
 #[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone, Display)]
@@ -141,7 +113,7 @@ impl Record {
       memory: result.memory,
       exit_code: result.exit_code,
       score: 0.,
-      message: RuntimeError::from(result.clone()).to_string(),
+      message: error::RuntimeError::from(result.clone()).to_string(),
     }
   }
 

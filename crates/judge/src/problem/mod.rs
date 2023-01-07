@@ -7,7 +7,7 @@ use futures::channel::mpsc;
 use futures::{stream, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::{checker, data, program, result, sandbox};
+use crate::{checker, data, program, record, sandbox};
 
 pub use self::answer::Answer;
 pub use self::input::Input;
@@ -89,12 +89,12 @@ impl Test {
     memory_limit: u64,
     user_copy_in: &HashMap<String, sandbox::FileHandle>,
     judge_copy_in: &HashMap<String, sandbox::FileHandle>,
-  ) -> result::Record {
+  ) -> record::Record {
     // Generate input file.
     let input_file = match self.input.make(user_copy_in.clone()).await {
       Ok(x) => x,
       Err(err) => {
-        return result::Record::new_system_error(
+        return record::Record::new_system_error(
           &("input file generated failed: ".to_string() + &err.to_string()),
         );
       }
@@ -121,7 +121,7 @@ impl Test {
     let answer_file = match answer_file {
       Ok(f) => f,
       Err(err) => {
-        return result::Record::new_system_error(
+        return record::Record::new_system_error(
           &("answer file generated failed: ".to_string() + &err.to_string()),
         );
       }
@@ -129,7 +129,7 @@ impl Test {
 
     // Handle the situation where the solution program exits abnormally.
     if execute_result.0.status != sandbox::Status::Accepted {
-      return result::Record::new_interrupted(&execute_result.0);
+      return record::Record::new_interrupted(&execute_result.0);
     }
 
     let output_file = execute_result.1.unwrap();
@@ -152,8 +152,8 @@ impl Test {
       .await;
 
     match checker_result {
-      Ok(checker_output) => result::Record::new_checked(&sol_result, &checker_output),
-      Err(err) => result::Record::new_system_error(
+      Ok(checker_output) => record::Record::new_checked(&sol_result, &checker_output),
+      Err(err) => record::Record::new_system_error(
         &("checker execute failed: ".to_string() + &err.to_string()),
       ),
     }
@@ -173,7 +173,7 @@ impl Subtask {
     user_copy_in: &HashMap<String, sandbox::FileHandle>,
     judge_copy_in: &HashMap<String, sandbox::FileHandle>,
     status_tx: Option<mpsc::UnboundedSender<Response>>,
-  ) -> (f32, Vec<result::Record>) {
+  ) -> (f32, Vec<record::Record>) {
     let records: Vec<_> =
       stream::FuturesOrdered::from_iter(self.tests.iter().enumerate().map(|t| {
         t.1.judge(
@@ -215,10 +215,10 @@ impl Subtask {
 #[serde(tag = "type")]
 pub enum Response {
   /// A single test case judge finished.
-  CompleteOne { record: result::Record },
+  CompleteOne { record: record::Record },
   /// The subject assessment is completed.
   Finished {
     score: f32,
-    records: Vec<result::Record>,
+    records: Vec<record::Record>,
   },
 }

@@ -4,7 +4,18 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use strum::Display;
 
-use crate::{program, result, sandbox};
+use crate::{error, program, sandbox};
+
+/// Limit the message to a maximum of 'LIMIT' characters.
+fn limit_message(s: &str) -> String {
+  const LIMIT: usize = 1024;
+  if s.as_bytes().len() <= LIMIT {
+    return s.to_string();
+  }
+  return String::from_utf8_lossy(&s.bytes().into_iter().take(LIMIT - 3).collect::<Vec<_>>())
+    .to_string()
+    + "...";
+}
 
 #[derive(Debug, PartialEq, strum::EnumString, Serialize, Deserialize, Clone, Display)]
 #[strum(serialize_all = "snake_case")]
@@ -91,7 +102,7 @@ impl Output {
     return Self {
       status: ret.0,
       score: ret.1,
-      message: result::limit_message(output),
+      message: limit_message(output),
     };
   }
 }
@@ -121,7 +132,7 @@ impl Checker {
     output_file: sandbox::FileHandle,
     answer_file: sandbox::FileHandle,
     mut copy_in: HashMap<String, sandbox::FileHandle>,
-  ) -> Result<Output, result::RuntimeError> {
+  ) -> Result<Output, error::RuntimeError> {
     copy_in.insert(self.exec.lang.exec().to_string(), self.exec.file.clone());
     copy_in.insert("inf.txt".to_string(), input_file);
     copy_in.insert("ouf.txt".to_string(), output_file);

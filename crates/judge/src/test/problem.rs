@@ -1,6 +1,6 @@
 use std::{collections::HashMap, str::FromStr, time};
 
-use crate::{builtin, data, generator, lang, problem, program, result, sandbox};
+use crate::{builtin, data, generator, lang, problem, program, record, sandbox};
 
 #[test]
 fn test_judge_a_plus_b() {
@@ -121,7 +121,7 @@ fn test_judge_a_plus_b() {
 
     assert_eq!(score, 1.);
     for record in &records {
-      assert_eq!(record.status, result::RecordStatus::Accepted);
+      assert_eq!(record.status, record::RecordStatus::Accepted);
     }
   });
 }

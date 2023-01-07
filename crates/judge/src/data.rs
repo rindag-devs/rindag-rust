@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::builtin;
 
+/// Data provider for files.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
 pub enum Provider {

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{generator, result, sandbox};
+use crate::{error, generator, sandbox};
 
 /// Input of test case.
 #[derive(Debug, Clone)]
@@ -20,7 +20,7 @@ impl Input {
   pub async fn make(
     &self,
     copy_in: HashMap<String, sandbox::FileHandle>,
-  ) -> Result<sandbox::FileHandle, result::RuntimeError> {
+  ) -> Result<sandbox::FileHandle, error::RuntimeError> {
     match self {
       Input::Generated { generator, args } => generator.generate(args.clone(), copy_in).await,
       Input::Plain { context } => Ok(sandbox::FileHandle::upload(context).await),

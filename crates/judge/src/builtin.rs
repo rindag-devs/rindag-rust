@@ -37,22 +37,9 @@ impl FromStr for File {
   /// Format: `pool:path/to/file`.
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     if let Some((pool, path)) = s.split_once(":") {
-      return Ok(Self {
-        pool: pool.to_string(),
-        path: path.to_string(),
-        content: match pool {
-          "testlib" => {
-            pools::Testlib::get(path).map_or(Err(Self::Err::Path(s.to_string())), |x| Ok(x.data))?
-          }
-          "checker" => {
-            pools::Checker::get(path).map_or(Err(Self::Err::Path(s.to_string())), |x| Ok(x.data))?
-          }
-          _ => Err(Self::Err::Folder(pool.to_string()))?,
-        },
-      });
-    } else {
-      return Err(Self::Err::Format(s.to_string()));
+      return Ok(Self::new(pool, path)?);
     }
+    return Err(Self::Err::Format(s.to_string()));
   }
 }
 
@@ -63,6 +50,25 @@ impl Display for File {
 }
 
 impl File {
+  pub fn new(pool: &str, path: &str) -> Result<Self, FileNotExistError> {
+    Ok(Self {
+      pool: pool.to_string(),
+      path: path.to_string(),
+      content: match pool {
+        "testlib" => pools::Testlib::get(path),
+        "checker" => pools::Checker::get(path),
+        _ => return Err(FileNotExistError::Pool(pool.to_string())),
+      }
+      .map_or(
+        Err(FileNotExistError::Path {
+          pool: pool.to_string(),
+          path: path.to_string(),
+        }),
+        |x| Ok(x.data),
+      )?,
+    })
+  }
+
   pub fn as_bytes(&self) -> &[u8] {
     return &self.content;
   }
@@ -73,9 +79,15 @@ pub enum FileFromStrError {
   #[error("format error: {0}")]
   Format(String),
 
-  #[error("builtin folder not found: {0}")]
-  Folder(String),
+  #[error("target file can not be found: {0}")]
+  NotExist(#[from] FileNotExistError),
+}
 
-  #[error("builtin file not found: {0}")]
-  Path(String),
+#[derive(Debug, Error, Clone)]
+pub enum FileNotExistError {
+  #[error("builtin pool not found: {0}")]
+  Pool(String),
+
+  #[error("builtin file not found: `{pool}:{path}`")]
+  Path { pool: String, path: String },
 }

@@ -5,13 +5,14 @@ pub mod args;
 pub mod builtin;
 pub mod checker;
 pub mod data;
+pub mod error;
 pub mod etc;
 pub mod generator;
 pub mod judge;
 pub mod lang;
 pub mod problem;
 pub mod program;
-pub mod result;
+pub mod record;
 pub mod sandbox;
 pub mod validator;
 

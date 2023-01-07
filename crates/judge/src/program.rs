@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{data, lang, result, sandbox};
+use crate::{data, error, lang, sandbox};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Source {
@@ -33,7 +33,7 @@ impl Source {
     &self,
     args: Vec<String>,
     mut copy_in: HashMap<String, sandbox::FileHandle>,
-  ) -> Result<Executable, result::RuntimeError> {
+  ) -> Result<Executable, error::CompileError> {
     copy_in.insert(
       self.lang.source().to_string(),
       sandbox::FileHandle::upload(&self.data.as_bytes()).await,
@@ -42,7 +42,7 @@ impl Source {
     let mut res = sandbox::Request::Run(sandbox::Cmd {
       args: [self.lang.compile_cmd().clone(), args].concat(),
       copy_in,
-      copy_out: vec![self.lang.exec().to_string()],
+      copy_out: vec!["stderr".to_string(), self.lang.exec().to_string()],
       ..Default::default()
     })
     .exec()
@@ -52,7 +52,18 @@ impl Source {
     let res = res.pop().unwrap();
 
     if res.result.status != sandbox::Status::Accepted {
-      return Err(res.result.into());
+      return Err(error::CompileError {
+        result: res.result,
+        message: match res.files.get("stderr") {
+          Some(message_file) => message_file
+            .context()
+            .await
+            .map_or("broken message".to_string(), |chars| {
+              String::from_utf8_lossy(&chars).to_string()
+            }),
+          None => "no compile message".to_string(),
+        },
+      });
     }
 
     Ok(Executable {

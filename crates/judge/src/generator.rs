@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{program, result, sandbox};
+use crate::{error, program, sandbox};
 
 #[derive(Debug, Clone)]
 pub struct Generator {
@@ -30,7 +30,7 @@ impl Generator {
     &self,
     args: Vec<String>,
     mut copy_in: HashMap<String, sandbox::FileHandle>,
-  ) -> Result<sandbox::FileHandle, result::RuntimeError> {
+  ) -> Result<sandbox::FileHandle, error::RuntimeError> {
     copy_in.insert(self.exec.lang.exec().to_string(), self.exec.file.clone());
 
     let mut res = sandbox::Request::Run(sandbox::Cmd {

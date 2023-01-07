@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use crate::{program, result, sandbox};
+use crate::{error, program, sandbox};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct VariableBounds {
@@ -81,7 +81,7 @@ impl Validator {
     args: Vec<String>,
     input_file: sandbox::FileHandle,
     mut copy_in: HashMap<String, sandbox::FileHandle>,
-  ) -> Result<Overview, result::RuntimeError> {
+  ) -> Result<Overview, error::RuntimeError> {
     copy_in.insert(self.exec.lang.exec().to_string(), self.exec.file.clone());
 
     let mut res = sandbox::Request::Run(sandbox::Cmd {
