@@ -4,13 +4,13 @@ use crate::builtin;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
-pub enum File {
+pub enum Provider {
   #[serde(with = "serde_bytes")]
   Memory(Vec<u8>),
   Builtin(builtin::File),
 }
 
-impl File {
+impl Provider {
   pub fn as_bytes(&self) -> &[u8] {
     match self {
       Self::Memory(m) => &m,
@@ -19,13 +19,13 @@ impl File {
   }
 }
 
-impl From<builtin::File> for File {
+impl From<builtin::File> for Provider {
   fn from(f: builtin::File) -> Self {
     Self::Builtin(f)
   }
 }
 
-impl From<Vec<u8>> for File {
+impl From<Vec<u8>> for Provider {
   fn from(f: Vec<u8>) -> Self {
     Self::Memory(f)
   }

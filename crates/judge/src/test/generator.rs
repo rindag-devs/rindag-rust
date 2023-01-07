@@ -1,13 +1,13 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use crate::{builtin, file, generator, lang, program, sandbox};
+use crate::{builtin, data, generator, lang, program, sandbox};
 
 #[test]
 fn test_simple() {
   super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("cpp").unwrap(),
-      data: file::File::Memory(
+      data: data::Provider::Memory(
         "
         #include\"testlib.h\"
         #include<iostream>

@@ -1,28 +1,30 @@
 use std::{borrow::Cow, fmt::Display, str::FromStr};
 
-use regex::Regex;
-use rust_embed::RustEmbed;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
-#[derive(RustEmbed)]
-#[folder = "third_party/testlib/"]
-#[include = "*.cpp"]
-#[include = "*.h"]
-/// Testlib source code.
-pub struct Testlib;
+mod pools {
+  use rust_embed::RustEmbed;
 
-/// Builtin checkers.
-#[derive(RustEmbed)]
-#[folder = "third_party/testlib/checkers/"]
-#[include = "*.cpp"]
-#[include = "*.h"]
-pub struct Checker;
+  /// Testlib source code.
+  #[derive(RustEmbed)]
+  #[folder = "third_party/testlib/"]
+  #[include = "*.cpp"]
+  #[include = "*.h"]
+  pub struct Testlib;
 
-/// A parsed builtin file.
+  /// Builtin checkers.
+  #[derive(RustEmbed)]
+  #[folder = "third_party/testlib/checkers/"]
+  #[include = "*.cpp"]
+  #[include = "*.h"]
+  pub struct Checker;
+}
+
+/// Parsed builtin data.
 #[derive(Debug, Clone, SerializeDisplay, DeserializeFromStr)]
 pub struct File {
-  folder: String,
+  pool: String,
   path: String,
   content: Cow<'static, [u8]>,
 }
@@ -30,43 +32,33 @@ pub struct File {
 impl FromStr for File {
   type Err = FileFromStrError;
 
+  /// Convert a string to builtin file.
+  ///
+  /// Format: `pool:path/to/file`.
   fn from_str(s: &str) -> Result<Self, Self::Err> {
-    // Convert a string to builtin file.
-    //
-    // Format:
-    //   folder:path/to/file
-
-    lazy_static! {
-      static ref PAT: Regex = Regex::new(r"(?s)^(\w+):(.*)$").unwrap();
+    if let Some((pool, path)) = s.split_once(":") {
+      return Ok(Self {
+        pool: pool.to_string(),
+        path: path.to_string(),
+        content: match pool {
+          "testlib" => {
+            pools::Testlib::get(path).map_or(Err(Self::Err::Path(s.to_string())), |x| Ok(x.data))?
+          }
+          "checker" => {
+            pools::Checker::get(path).map_or(Err(Self::Err::Path(s.to_string())), |x| Ok(x.data))?
+          }
+          _ => Err(Self::Err::Folder(pool.to_string()))?,
+        },
+      });
+    } else {
+      return Err(Self::Err::Format(s.to_string()));
     }
-
-    return match PAT.captures(s) {
-      Some(cap) => {
-        let folder = &cap[1];
-        let path = &cap[2];
-
-        Ok(Self {
-          folder: folder.to_string(),
-          path: path.to_string(),
-          content: match folder {
-            "testlib" => {
-              Testlib::get(path).map_or(Err(Self::Err::Path(s.to_string())), |x| Ok(x.data))?
-            }
-            "checker" => {
-              Checker::get(path).map_or(Err(Self::Err::Path(s.to_string())), |x| Ok(x.data))?
-            }
-            _ => Err(Self::Err::Folder(folder.to_string()))?,
-          },
-        })
-      }
-      None => Err(Self::Err::Format(s.to_string())),
-    };
   }
 }
 
 impl Display for File {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}:{}", self.folder, self.path)
+    write!(f, "{}:{}", self.pool, self.path)
   }
 }
 

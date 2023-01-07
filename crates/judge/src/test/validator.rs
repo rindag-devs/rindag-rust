@@ -1,13 +1,13 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use crate::{builtin, file, lang, program, sandbox, validator};
+use crate::{builtin, data, lang, program, sandbox, validator};
 
 #[test]
 fn test_val_a_plus_b() {
   super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("cpp").unwrap(),
-      data: file::File::Memory(
+      data: data::Provider::Memory(
         "
         #include\"testlib.h\"
         signed main(signed argc,char**argv){

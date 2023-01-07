@@ -1,13 +1,13 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc, time};
 
-use crate::{file, lang, program, sandbox};
+use crate::{data, lang, program, sandbox};
 
 #[test]
 fn test_ce() {
   super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("c").unwrap(),
-      data: file::File::Memory("ERROR".as_bytes().to_vec()),
+      data: data::Provider::Memory("ERROR".as_bytes().to_vec()),
     };
 
     let res = src.compile(vec![], HashMap::new()).await;
@@ -21,7 +21,7 @@ fn test_ok() {
   super::async_test(async {
     let src = program::Source {
       lang: lang::Lang::from_str("c").unwrap(),
-      data: file::File::Memory(
+      data: data::Provider::Memory(
         "#include\"my_head.c\"\nint main(){puts(\"hello\");func();return 0;}"
           .as_bytes()
           .to_vec(),

@@ -115,5 +115,5 @@ pub struct FileGetError {
 
 lazy_static! {
   pub(super) static ref CLIENT: AsyncOnce<Client> =
-    AsyncOnce::new(async { Client::connect(&CONFIG.sandbox).await });
+    AsyncOnce::new(Client::connect(&CONFIG.sandbox));
 }

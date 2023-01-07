@@ -7,7 +7,7 @@ use futures::channel::mpsc;
 use futures::{stream, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::{checker, file, program, result, sandbox};
+use crate::{checker, data, program, result, sandbox};
 
 pub use self::answer::Answer;
 pub use self::input::Input;
@@ -34,10 +34,10 @@ pub struct Problem {
   pub standard_solution: program::Source,
 
   /// Extra files when compiling or running checker.
-  pub user_copy_in: HashMap<String, file::File>,
+  pub user_copy_in: HashMap<String, data::Provider>,
 
   /// Extra files when running solution.
-  pub judge_copy_in: HashMap<String, file::File>,
+  pub judge_copy_in: HashMap<String, data::Provider>,
 }
 
 /// Type of the problem.

@@ -2,12 +2,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{file, lang, result, sandbox};
+use crate::{data, lang, result, sandbox};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Source {
   pub lang: lang::Lang,
-  pub data: file::File,
+  pub data: data::Provider,
 }
 
 #[derive(Debug, Clone)]

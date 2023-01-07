@@ -1,13 +1,13 @@
 use std::{collections::HashMap, str::FromStr, sync::Arc, time};
 
-use crate::{builtin, file, generator, lang, problem, program, result, sandbox};
+use crate::{builtin, data, generator, lang, problem, program, result, sandbox};
 
 #[test]
 fn test_judge_a_plus_b() {
   super::async_test(async {
     let sol_c = program::Source {
       lang: lang::Lang::from_str("c").unwrap(),
-      data: file::File::Memory(
+      data: data::Provider::Memory(
         "
         #include<stdio.h>
         int main(){int a,b;scanf(\"%d%d\",&a,&b);printf(\"%d\\n\",a+b);}
@@ -19,7 +19,7 @@ fn test_judge_a_plus_b() {
 
     let sol_cpp = program::Source {
       lang: lang::Lang::from_str("cpp").unwrap(),
-      data: file::File::Memory(
+      data: data::Provider::Memory(
         "
         #include <iostream>
         signed main(){
@@ -50,7 +50,7 @@ fn test_judge_a_plus_b() {
             generator: generator::Generator::from(
               program::Source {
                 lang: lang::Lang::from_str("cpp").unwrap(),
-                data: file::File::Memory(
+                data: data::Provider::Memory(
                   "
                   #include\"testlib.h\"
                   #include<iostream>
