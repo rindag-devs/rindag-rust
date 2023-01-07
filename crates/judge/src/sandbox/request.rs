@@ -1,5 +1,5 @@
 use core::time;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::CONFIG;
 
@@ -29,7 +29,7 @@ impl Request {
               Some(f) => proto::request::File {
                 file: Some(proto::request::file::File::Cached(
                   proto::request::CachedFile {
-                    file_id: f.id.clone(),
+                    file_id: f.id().clone(),
                   },
                 )),
               },
@@ -77,7 +77,7 @@ impl Request {
                   proto::request::File {
                     file: Some(proto::request::file::File::Cached(
                       proto::request::CachedFile {
-                        file_id: f.1.id.clone(),
+                        file_id: f.1.id().clone(),
                       },
                     )),
                   },
@@ -137,10 +137,10 @@ pub struct Cmd {
   /// If this command is used in a piped execution, leave this field to None.
   ///
   /// If this field is None the command is used in a `Request::Run`, it will use a empty file.
-  pub stdin: Option<Arc<FileHandle>>,
+  pub stdin: Option<FileHandle>,
 
   /// Copy the correspond file to the container dst path.
-  pub copy_in: HashMap<String, Arc<FileHandle>>,
+  pub copy_in: HashMap<String, FileHandle>,
 
   /// Names to files which is need to be copied out from the container after execution.
   ///

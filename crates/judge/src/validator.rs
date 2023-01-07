@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -79,8 +79,8 @@ impl Validator {
   pub async fn validate(
     &self,
     args: Vec<String>,
-    input_file: Arc<sandbox::FileHandle>,
-    mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+    input_file: sandbox::FileHandle,
+    mut copy_in: HashMap<String, sandbox::FileHandle>,
   ) -> Result<Overview, result::RuntimeError> {
     copy_in.insert(self.exec.lang.exec().to_string(), self.exec.file.clone());
 

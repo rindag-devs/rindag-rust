@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{
   builtin,
@@ -70,14 +70,12 @@ fn test_builtin_checker() {
           vec![],
           [(
             "testlib.h".to_string(),
-            Arc::new(
-              sandbox::FileHandle::upload(
-                &builtin::File::from_str("testlib:testlib.h")
-                  .unwrap()
-                  .as_bytes(),
-              )
-              .await,
-            ),
+            sandbox::FileHandle::upload(
+              &builtin::File::from_str("testlib:testlib.h")
+                .unwrap()
+                .as_bytes(),
+            )
+            .await,
           )]
           .into(),
         )
@@ -88,9 +86,9 @@ fn test_builtin_checker() {
     let res = chk
       .check(
         vec![],
-        Arc::new(sandbox::FileHandle::upload("hello\n".as_bytes()).await),
-        Arc::new(sandbox::FileHandle::upload("9 9   8\n2\n  4 4\t3 5\n3".as_bytes()).await),
-        Arc::new(sandbox::FileHandle::upload("9 9 8 2 4 4 3 5 3\n".as_bytes()).await),
+        sandbox::FileHandle::upload("hello\n".as_bytes()).await,
+        sandbox::FileHandle::upload("9 9   8\n2\n  4 4\t3 5\n3".as_bytes()).await,
+        sandbox::FileHandle::upload("9 9 8 2 4 4 3 5 3\n".as_bytes()).await,
         HashMap::new(),
       )
       .await

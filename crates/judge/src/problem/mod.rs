@@ -1,7 +1,7 @@
 mod answer;
 mod input;
 
-use std::{collections::HashMap, sync::Arc, time};
+use std::{collections::HashMap, time};
 
 use futures::channel::mpsc;
 use futures::{stream, SinkExt, StreamExt};
@@ -87,8 +87,8 @@ impl Test {
     checker: &checker::Checker,
     time_limit: time::Duration,
     memory_limit: u64,
-    user_copy_in: &HashMap<String, Arc<sandbox::FileHandle>>,
-    judge_copy_in: &HashMap<String, Arc<sandbox::FileHandle>>,
+    user_copy_in: &HashMap<String, sandbox::FileHandle>,
+    judge_copy_in: &HashMap<String, sandbox::FileHandle>,
   ) -> result::Record {
     // Generate input file.
     let input_file = match self.input.make(user_copy_in.clone()).await {
@@ -170,8 +170,8 @@ impl Subtask {
     solution: &program::Executable,
     standard_solution: &program::Executable,
     checker: &checker::Checker,
-    user_copy_in: &HashMap<String, Arc<sandbox::FileHandle>>,
-    judge_copy_in: &HashMap<String, Arc<sandbox::FileHandle>>,
+    user_copy_in: &HashMap<String, sandbox::FileHandle>,
+    judge_copy_in: &HashMap<String, sandbox::FileHandle>,
     status_tx: Option<mpsc::UnboundedSender<Response>>,
   ) -> (f32, Vec<result::Record>) {
     let records: Vec<_> =

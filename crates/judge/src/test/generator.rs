@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{builtin, data, generator, lang, program, sandbox};
 
@@ -28,14 +28,12 @@ fn test_simple() {
           vec![],
           [(
             "testlib.h".to_string(),
-            Arc::new(
-              sandbox::FileHandle::upload(
-                &builtin::File::from_str("testlib:testlib.h")
-                  .unwrap()
-                  .as_bytes(),
-              )
-              .await,
-            ),
+            sandbox::FileHandle::upload(
+              &builtin::File::from_str("testlib:testlib.h")
+                .unwrap()
+                .as_bytes(),
+            )
+            .await,
           )]
           .into(),
         )

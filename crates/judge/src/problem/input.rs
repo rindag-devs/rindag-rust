@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{generator, result, sandbox};
 
@@ -19,11 +19,11 @@ impl Input {
   /// Make the input and upload to sandbox.
   pub async fn make(
     &self,
-    copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
-  ) -> Result<Arc<sandbox::FileHandle>, result::RuntimeError> {
+    copy_in: HashMap<String, sandbox::FileHandle>,
+  ) -> Result<sandbox::FileHandle, result::RuntimeError> {
     match self {
       Input::Generated { generator, args } => generator.generate(args.clone(), copy_in).await,
-      Input::Plain { context } => Ok(Arc::new(sandbox::FileHandle::upload(context).await)),
+      Input::Plain { context } => Ok(sandbox::FileHandle::upload(context).await),
     }
   }
 }

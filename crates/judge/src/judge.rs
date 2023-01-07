@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time};
+use std::{collections::HashMap, time};
 
 use crate::{program, sandbox};
 
@@ -13,11 +13,11 @@ impl program::Executable {
   pub async fn judge_batch(
     &self,
     args: Vec<String>,
-    input_file: Arc<sandbox::FileHandle>,
-    mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+    input_file: sandbox::FileHandle,
+    mut copy_in: HashMap<String, sandbox::FileHandle>,
     time_limit: time::Duration,
     memory_limit: u64,
-  ) -> (sandbox::ExecuteResult, Option<Arc<sandbox::FileHandle>>) {
+  ) -> (sandbox::ExecuteResult, Option<sandbox::FileHandle>) {
     copy_in.insert(self.lang.exec().to_string(), self.file.clone());
 
     let mut res = sandbox::Request::Run(sandbox::Cmd {

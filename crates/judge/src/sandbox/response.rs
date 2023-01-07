@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, time};
+use std::{collections::HashMap, time};
 
 use serde::{Deserialize, Serialize};
 use strum::Display;
@@ -10,7 +10,7 @@ use super::{proto, FileHandle};
 #[derive(Debug, Clone)]
 pub struct ResponseResult {
   pub result: ExecuteResult,
-  pub files: HashMap<String, Arc<FileHandle>>,
+  pub files: HashMap<String, FileHandle>,
 }
 
 /// Execution result of one `Cmd`.
@@ -74,7 +74,7 @@ impl From<proto::response::Result> for ResponseResult {
       files: res
         .file_ids
         .into_iter()
-        .map(|f| (f.0, Arc::new(FileHandle::from_id(f.1))))
+        .map(|f| (f.0, FileHandle::from_id(f.1)))
         .collect(),
     }
   }

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::sandbox;
 
 /// A test for sandbox compiling and running a C code with gcc.
@@ -10,12 +8,10 @@ fn test_hello_world() {
       args: vec!["/usr/bin/gcc".to_string(), "a.c".to_string()],
       copy_in: [(
         "a.c".to_string(),
-        Arc::new(
-          sandbox::FileHandle::upload(
-            "#include<stdio.h>\nint main(){puts(\"hello, world!\\n你好, 世界!\");}".as_bytes(),
-          )
-          .await,
-        ),
+        sandbox::FileHandle::upload(
+          "#include<stdio.h>\nint main(){puts(\"hello, world!\\n你好, 世界!\");}".as_bytes(),
+        )
+        .await,
       )]
       .into(),
       copy_out: vec!["a.out".to_string()],

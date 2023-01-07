@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ pub struct Source {
 #[derive(Debug, Clone)]
 pub struct Executable {
   pub lang: lang::Lang,
-  pub file: Arc<sandbox::FileHandle>,
+  pub file: sandbox::FileHandle,
 }
 
 impl Source {
@@ -32,11 +32,11 @@ impl Source {
   pub async fn compile(
     &self,
     args: Vec<String>,
-    mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+    mut copy_in: HashMap<String, sandbox::FileHandle>,
   ) -> Result<Executable, result::RuntimeError> {
     copy_in.insert(
       self.lang.source().to_string(),
-      Arc::new(sandbox::FileHandle::upload(&self.data.as_bytes()).await),
+      sandbox::FileHandle::upload(&self.data.as_bytes()).await,
     );
 
     let mut res = sandbox::Request::Run(sandbox::Cmd {

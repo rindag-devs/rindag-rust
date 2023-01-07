@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr};
 
 use crate::{builtin, data, lang, program, sandbox, validator};
 
@@ -36,14 +36,12 @@ fn test_val_a_plus_b() {
           vec![],
           [(
             "testlib.h".to_string(),
-            Arc::new(
-              sandbox::FileHandle::upload(
-                &builtin::File::from_str("testlib:testlib.h")
-                  .unwrap()
-                  .as_bytes(),
-              )
-              .await,
-            ),
+            sandbox::FileHandle::upload(
+              &builtin::File::from_str("testlib:testlib.h")
+                .unwrap()
+                .as_bytes(),
+            )
+            .await,
           )]
           .into(),
         )
@@ -55,7 +53,7 @@ fn test_val_a_plus_b() {
       val
         .validate(
           vec!["--group".to_string(), "even_a_and_b".to_string()],
-          Arc::new(sandbox::FileHandle::upload("0 -10\n".as_bytes()).await),
+          sandbox::FileHandle::upload("0 -10\n".as_bytes()).await,
           HashMap::new(),
         )
         .await
@@ -86,7 +84,7 @@ fn test_val_a_plus_b() {
       val
         .validate(
           vec![],
-          Arc::new(sandbox::FileHandle::upload("-100 100\n".as_bytes()).await),
+          sandbox::FileHandle::upload("-100 100\n".as_bytes()).await,
           HashMap::new(),
         )
         .await
@@ -116,7 +114,7 @@ fn test_val_a_plus_b() {
     assert!(val
       .validate(
         vec![],
-        Arc::new(sandbox::FileHandle::upload("-100 101\n".as_bytes()).await),
+        sandbox::FileHandle::upload("-100 101\n".as_bytes()).await,
         HashMap::new(),
       )
       .await
@@ -125,7 +123,7 @@ fn test_val_a_plus_b() {
     assert!(val
       .validate(
         vec!["--group".to_string(), "even_a_and_b".to_string()],
-        Arc::new(sandbox::FileHandle::upload("1 2\n".as_bytes()).await),
+        sandbox::FileHandle::upload("1 2\n".as_bytes()).await,
         HashMap::new(),
       )
       .await

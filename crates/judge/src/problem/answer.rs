@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{program, result, sandbox};
 
@@ -17,11 +17,11 @@ impl Answer {
   pub async fn make(
     &self,
     standard_solution: &program::Executable,
-    input_file: Arc<sandbox::FileHandle>,
-    copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+    input_file: sandbox::FileHandle,
+    copy_in: HashMap<String, sandbox::FileHandle>,
     time_limit: std::time::Duration,
     memory_limit: u64,
-  ) -> Result<Arc<sandbox::FileHandle>, result::RuntimeError> {
+  ) -> Result<sandbox::FileHandle, result::RuntimeError> {
     match self {
       Answer::Generated => {
         let (res, file) = standard_solution
@@ -32,7 +32,7 @@ impl Answer {
         }
         Ok(file.unwrap())
       }
-      Answer::Plain { context } => Ok(Arc::new(sandbox::FileHandle::upload(context).await)),
+      Answer::Plain { context } => Ok(sandbox::FileHandle::upload(context).await),
     }
   }
 }

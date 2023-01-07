@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, str::FromStr};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -117,10 +117,10 @@ impl Checker {
   pub async fn check(
     &self,
     args: Vec<String>,
-    input_file: Arc<sandbox::FileHandle>,
-    output_file: Arc<sandbox::FileHandle>,
-    answer_file: Arc<sandbox::FileHandle>,
-    mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
+    input_file: sandbox::FileHandle,
+    output_file: sandbox::FileHandle,
+    answer_file: sandbox::FileHandle,
+    mut copy_in: HashMap<String, sandbox::FileHandle>,
   ) -> Result<Output, result::RuntimeError> {
     copy_in.insert(self.exec.lang.exec().to_string(), self.exec.file.clone());
     copy_in.insert("inf.txt".to_string(), input_file);

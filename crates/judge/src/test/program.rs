@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc, time};
+use std::{collections::HashMap, str::FromStr, time};
 
 use crate::{data, lang, program, sandbox};
 
@@ -33,13 +33,11 @@ fn test_ok() {
         vec![],
         [(
           "my_head.c".to_string(),
-          Arc::new(
-            sandbox::FileHandle::upload(
-              "#include<stdio.h>\nvoid func(){int x;scanf(\"%d\",&x);printf(\"func: %d\\n\",x);}"
-                .as_bytes(),
-            )
-            .await,
-          ),
+          sandbox::FileHandle::upload(
+            "#include<stdio.h>\nvoid func(){int x;scanf(\"%d\",&x);printf(\"func: %d\\n\",x);}"
+              .as_bytes(),
+          )
+          .await,
         )]
         .into(),
       )
@@ -49,7 +47,7 @@ fn test_ok() {
     let res = exec
       .judge_batch(
         vec![],
-        Arc::new(sandbox::FileHandle::upload("998244353".as_bytes()).await),
+        sandbox::FileHandle::upload("998244353".as_bytes()).await,
         [].into(),
         time::Duration::from_secs(1),
         64 * 1024 * 1024,

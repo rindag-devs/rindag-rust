@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use crate::{program, result, sandbox};
 
@@ -29,8 +29,8 @@ impl Generator {
   pub async fn generate(
     &self,
     args: Vec<String>,
-    mut copy_in: HashMap<String, Arc<sandbox::FileHandle>>,
-  ) -> Result<Arc<sandbox::FileHandle>, result::RuntimeError> {
+    mut copy_in: HashMap<String, sandbox::FileHandle>,
+  ) -> Result<sandbox::FileHandle, result::RuntimeError> {
     copy_in.insert(self.exec.lang.exec().to_string(), self.exec.file.clone());
 
     let mut res = sandbox::Request::Run(sandbox::Cmd {

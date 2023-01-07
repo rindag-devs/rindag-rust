@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc, time};
+use std::{collections::HashMap, str::FromStr, time};
 
 use crate::{builtin, data, generator, lang, problem, program, result, sandbox};
 
@@ -68,14 +68,12 @@ fn test_judge_a_plus_b() {
                 vec![],
                 [(
                   "testlib.h".to_string(),
-                  Arc::new(
-                    sandbox::FileHandle::upload(
-                      &builtin::File::from_str("testlib:testlib.h")
-                        .unwrap()
-                        .as_bytes(),
-                    )
-                    .await,
-                  ),
+                  sandbox::FileHandle::upload(
+                    &builtin::File::from_str("testlib:testlib.h")
+                      .unwrap()
+                      .as_bytes(),
+                  )
+                  .await,
                 )]
                 .into(),
               )
@@ -98,14 +96,12 @@ fn test_judge_a_plus_b() {
 
     let user_copy_in = HashMap::from([(
       "testlib.h".to_string(),
-      Arc::new(
-        sandbox::FileHandle::upload(
-          builtin::File::from_str("testlib:testlib.h")
-            .unwrap()
-            .as_bytes(),
-        )
-        .await,
-      ),
+      sandbox::FileHandle::upload(
+        builtin::File::from_str("testlib:testlib.h")
+          .unwrap()
+          .as_bytes(),
+      )
+      .await,
     )]);
 
     let (score, records) = subtask
